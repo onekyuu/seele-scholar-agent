@@ -43,6 +43,9 @@ ENV/
 # Environment
 .env
 .env.local
+!.env.example
 
 # uv lock (optional - uncomment if you don't want to commit lock file)
 # uv.lock
+
+/output/
