@@ -6,11 +6,9 @@ from uuid import uuid4
 
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
-
 from seele_scholar_agent.config import settings
 from seele_scholar_agent.graph import create_simple_writing_graph, create_writing_graph
 from seele_scholar_agent.state import AgentState
-
 
 OUTPUT_DIR = Path(__file__).parent / "output"
 
@@ -36,7 +34,7 @@ def save_paper(result: dict, output_dir: Path = OUTPUT_DIR, lang: str = "zh") ->
         "",
         f"**Keywords:** {', '.join(outline.keywords)}",
         "",
-        f"## Abstract",
+        "## Abstract",
         "",
         outline.abstract,
         "",
@@ -112,12 +110,12 @@ async def run_with_human_approval(topic: str, lang: str):
     initial_state = build_initial_state(topic, lang, thread_id)
     initial_state["outline_approved"] = False
 
-    print(f"\n[Step 1] 运行 graph直到 waiting_human...")
+    print("\n[Step 1] 运行 graph直到 waiting_human...")
     result = await app.ainvoke(initial_state, config=config)
     print(f"状态: {result.get('status')}")
 
     if result.get("outline"):
-        print(f"\n生成的大纲:")
+        print("\n生成的大纲:")
         print(f"  标题: {result['outline'].title}")
         print(f"  章节数: {len(result['outline'].sections)}")
         for s in result["outline"].sections:
@@ -154,7 +152,7 @@ async def run_auto_approved(topic: str, lang: str):
     config = {"configurable": {"thread_id": thread_id}}
     initial_state = build_initial_state(topic, lang, thread_id)
 
-    print(f"\n运行完整流程...")
+    print("\n运行完整流程...")
     result = await app.ainvoke(initial_state, config=config)
     print(f"状态: {result.get('status')}")
 
@@ -163,7 +161,7 @@ async def run_auto_approved(topic: str, lang: str):
         print(f"章节数: {len(result['outline'].sections)}")
 
     if result.get("sections"):
-        print(f"章节状态:")
+        print("章节状态:")
         for s in result["sections"]:
             content_preview = s.content[:50] + "..." if len(s.content) > 50 else s.content
             print(f"  {s.title}: {s.status}")
@@ -175,7 +173,7 @@ async def run_auto_approved(topic: str, lang: str):
 
 async def main():
     parser = argparse.ArgumentParser(description="Seele Scholar Agent")
-    parser.add_argument("--topic", "-t", default="Wwise和交互式音乐设计", help="研究主题")
+    parser.add_argument("--topic", "-t", default="生态警务现实困境与发展面向", help="研究主题")
     parser.add_argument(
         "--lang",
         "-l",
@@ -192,7 +190,7 @@ async def main():
     )
     args = parser.parse_args()
 
-    print(f"seele-scholar-agent 演示")
+    print("seele-scholar-agent 演示")
     print(f"主题: {args.topic}")
     print(f"语言: {LANGUAGE_NAMES.get(args.lang, args.lang)}")
     print()
