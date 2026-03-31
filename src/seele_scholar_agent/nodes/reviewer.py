@@ -8,18 +8,19 @@ from langchain_openai import ChatOpenAI
 from ..config import settings
 from ..logging import get_logger
 from ..state import AgentState, ReviewIssue, ReviewResult
-from .prompts import REVIEWER_SYSTEM_PROMPT, REVIEWER_USER_PROMPT
+from ..agent_config import PromptsConfig
 
 logger = get_logger(__name__)
 
 
 class ReviewerNode:
-    def __init__(self, model: ChatOpenAI):
+    def __init__(self, model: ChatOpenAI, prompts: PromptsConfig):
         self.model = model
+        self.prompts = prompts
         self.prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", REVIEWER_SYSTEM_PROMPT),
-                ("user", REVIEWER_USER_PROMPT),
+                ("system", self.prompts.reviewer_system_prompt),
+                ("user", self.prompts.reviewer_user_prompt),
             ]
         )
         self.parser = JsonOutputParser()

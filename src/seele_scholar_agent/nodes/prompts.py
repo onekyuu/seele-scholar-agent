@@ -106,3 +106,20 @@ REVIEWER_USER_PROMPT = """请审阅以下论文章节：
 }}
 
 如果 score >= 7 且 issues 为空，approved 应为 true。"""
+
+TOPIC_PROPOSER_SYSTEM_PROMPT = """
+你是一位顶尖的学术导师。你的任务是帮助学生将一个【宽泛的研究方向】收敛为具体、有价值的【论文选题】。
+你需要阅读该领域最新的几篇相关文献，总结当前的研究趋势（如：大家都在解决什么痛点、用了什么新方法），然后基于这些趋势，提出 3 个具体的可行选题。
+
+输出格式要求为 JSON，包含一个 `topics` 数组，每个元素包含：
+- title: 具体的论文选题（{language}）
+- description: 选题的详细描述和切入点
+- trend_analysis: 趋势分析（简述该选题是受哪几篇最新文献启发，解决了当前领域的什么问题）
+- difficulty_level: 评估难度（容易/中等/困难）"""
+
+TOPIC_PROPOSER_USER_PROMPT = """宽泛研究方向：{topic}
+
+以下是该领域近期发表的代表性文献：
+{papers_summary}
+
+请结合上述最新文献的研究趋势，为我推荐 3 个具体的论文选题。目标语言：{language}。"""

@@ -4,27 +4,21 @@ from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
+from ..agent_config import PromptsConfig
 from ..logging import get_logger
 from ..state import AgentState, OutlineStructure, SectionDraft, SectionOutline
-from .prompts import (
-    LANGUAGE_ABSTRACT,
-    LANGUAGE_KEYWORDS,
-    LANGUAGE_NAMES,
-    LANGUAGE_TITLES,
-    PLANNER_SYSTEM_PROMPT,
-    PLANNER_USER_PROMPT,
-)
 
 logger = get_logger(__name__)
 
 
 class PlannerNode:
-    def __init__(self, model: ChatOpenAI):
+    def __init__(self, model: ChatOpenAI, prompts: PromptsConfig):
         self.model = model
+        self.prompts = prompts
         self.prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", PLANNER_SYSTEM_PROMPT),
-                ("user", PLANNER_USER_PROMPT),
+                ("system", self.prompts.planner_system_prompt),
+                ("user", self.prompts.planner_user_prompt),
             ]
         )
         self.parser = JsonOutputParser()
@@ -51,11 +45,11 @@ class PlannerNode:
                 {
                     "topic": topic,
                     "papers_summary": papers_summary,
-                    "language": LANGUAGE_NAMES[lang],
-                    "language_title": LANGUAGE_TITLES[lang],
-                    "title_placeholder": LANGUAGE_TITLES[lang],
-                    "abstract_placeholder": LANGUAGE_ABSTRACT[lang],
-                    "keyword_placeholder": LANGUAGE_KEYWORDS[lang],
+                    "language": self.prompts.language_names.get(lang, "中文"),
+                    "language_title": self.prompts.language_titles.get(lang, "论文标题"),
+                    "title_placeholder": self.prompts.language_titles.get(lang, "论文标题"),
+                    "abstract_placeholder": self.prompts.language_abstract.get(lang, "摘要"),
+                    "keyword_placeholder": self.prompts.language_keywords.get(lang, "关键词"),
                 }
             )
         except Exception as e:

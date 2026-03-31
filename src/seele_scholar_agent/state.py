@@ -17,6 +17,12 @@ class PaperMetadata(BaseModel):
     source: Literal["arxiv", "semantic_scholar", "openalex", "user_library"] = "openalex"
 
 
+class ProposedTopic(BaseModel):
+    title: str
+    description: str
+    trend_analysis: str
+    difficulty_level: Literal["easy", "medium", "hard"]
+
 class DocumentChunk(BaseModel):
     chunk_id: str
     content: str
@@ -66,6 +72,8 @@ class ReviewResult(BaseModel):
 class AgentState(TypedDict):
     thread_id: str
     topic: str
+    broad_papers: list[PaperMetadata]
+    proposed_topics: list[ProposedTopic]
     language: Literal["zh", "en", "ja"]
     created_at: datetime
     tenant_id: str | None
@@ -95,3 +103,4 @@ class AgentState(TypedDict):
     error_message: str | None
     max_revisions: int
     revision_count: int
+    prompt: str | None

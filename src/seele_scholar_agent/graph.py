@@ -5,43 +5,47 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from seele_scholar_agent.nodes.topic_proposer import TopicProposerNode
+
 from .config import settings
 from .nodes.planner import PlannerNode
 from .nodes.researcher import ResearcherNode
 from .nodes.reviewer import ReviewerNode
 from .nodes.writer import WriterNode
 from .state import AgentState
+from .agent_config import PromptsConfig, RAGRetrieverFunc
 
 
 def create_writing_graph(
     model: ChatOpenAI,
-    qdrant_client=None,
-    embedding_model=None,
+    prompts: PromptsConfig,
+    rag_retriever: RAGRetrieverFunc | None,
     semantic_scholar_key: str | None = None,
     openalex_email: str | None = None
 ) -> CompiledStateGraph:
+    topic_proposer = TopicProposerNode(model=model, prompts=prompts)
     researcher = ResearcherNode(
-        qdrant_client=qdrant_client,
-        embedding_model=embedding_model,
         semantic_scholar_key=semantic_scholar_key or settings.SEMANTIC_SCHOLAR_API_KEY,
         openalex_email=openalex_email
     )
-    planner = PlannerNode(model=model)
+    planner = PlannerNode(model=model, prompts=prompts)
 
-    writer = WriterNode(model=model)
-    reviewer = ReviewerNode(model=model)
+    writer = WriterNode(model=model, prompts=prompts, rag_retriever=rag_retriever)
+    reviewer = ReviewerNode(model=model, prompts=prompts)
 
     graph = StateGraph(AgentState)
 
+    graph.add_node("proposer", topic_proposer.propose)
     graph.add_node("researcher", researcher.search)
     graph.add_node("planner", planner.plan)
     graph.add_node("writer", writer.write)
     graph.add_node("reviewer", reviewer.review)
 
-    graph.add_edge(START, "researcher")
+    graph.add_edge(START, "topic_proposer")
+    graph.add_edge("topic_proposer", "researcher")
     graph.add_edge("researcher", "planner")
 
-    graph.add_edge("planner", END)
+    graph.add_edge("planner", "writer")
     graph.add_edge("writer", "reviewer")
 
     def route_reviewer(state: AgentState) -> Literal["writer", "__end__"]:
@@ -56,34 +60,35 @@ def create_writing_graph(
 
     graph.add_conditional_edges("reviewer", route_reviewer, {"writer": "writer", "__end__": END})
 
-    return graph.compile(checkpointer=MemorySaver(), interrupt_after=["planner"])
+    return graph.compile(checkpointer=MemorySaver(), interrupt_after=["topic_proposer", "planner"])
 
 
 def create_simple_writing_graph(
     model: ChatOpenAI,
-    qdrant_client=None,
-    embedding_model=None,
+    prompts: PromptsConfig,
+    rag_retriever: RAGRetrieverFunc | None = None,
     semantic_scholar_key: str | None = None,
     openalex_email: str | None = None
 ) -> CompiledStateGraph:
+    topic_proposer = TopicProposerNode(model=model, prompts=prompts)
     researcher = ResearcherNode(
-        qdrant_client=qdrant_client,
-        embedding_model=embedding_model,
         semantic_scholar_key=semantic_scholar_key or settings.SEMANTIC_SCHOLAR_API_KEY,
         openalex_email=openalex_email
     )
-    planner = PlannerNode(model=model)
-    writer = WriterNode(model=model)
-    reviewer = ReviewerNode(model=model)
+    planner = PlannerNode(model=model, prompts=prompts)
+    writer = WriterNode(model=model, prompts=prompts, rag_retriever=rag_retriever)
+    reviewer = ReviewerNode(model=model, prompts=prompts)
 
     graph = StateGraph(AgentState)
 
+    graph.add_node("proposer", topic_proposer.propose)
     graph.add_node("researcher", researcher.search)
     graph.add_node("planner", planner.plan)
     graph.add_node("writer", writer.write)
     graph.add_node("reviewer", reviewer.review)
 
-    graph.add_edge(START, "researcher")
+    graph.add_edge(START, "proposer")
+    graph.add_edge("proposer", "researcher")
     graph.add_edge("researcher", "planner")
     graph.add_edge("planner", "writer")
     graph.add_edge("writer", "reviewer")

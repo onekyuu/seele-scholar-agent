@@ -3,19 +3,20 @@ from typing import Any
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
+from ..agent_config import PromptsConfig, RAGRetrieverFunc
 from ..logging import get_logger
 from ..state import AgentState
-from .prompts import LANGUAGE_NAMES, WRITER_SYSTEM_PROMPT, WRITER_USER_PROMPT
 
 logger = get_logger(__name__)
 
 
 class WriterNode:
-    def __init__(self, model: ChatOpenAI, rag_service=None):
+    def __init__(self, model: ChatOpenAI, prompts: PromptsConfig, rag_retriever: RAGRetrieverFunc | None = None):
         self.model = model
-        self.rag_service = rag_service
+        self.prompts = prompts
+        self.rag_retriever = rag_retriever
         self.prompt = ChatPromptTemplate.from_messages(
-            [("system", WRITER_SYSTEM_PROMPT), ("user", WRITER_USER_PROMPT)]
+            [("system", prompts.writer_system_prompt), ("user", prompts.writer_user_prompt)]
         )
         self.chain = self.prompt | self.model
 
@@ -37,15 +38,21 @@ class WriterNode:
 
         logger.info(f"Writing section: {section.title}", language=lang)
 
+        if self.rag_retriever:
+            search_query = f"{state['topic']} {section.title} {section.description}"
+            rag_chunks = await self.rag_retriever(search_query)
+            rag_context = self._build_rag_context(rag_chunks)
+        else:
+            rag_context = self._build_rag_context(state.get("rag_context"))
+
         outline_json = self._build_outline_json(state.get("outline"))
-        rag_context = self._build_rag_context(state.get("rag_context"))
         review_comments = self._build_review_comments(section)
 
         try:
             result = await self.chain.ainvoke(
                 {
                     "topic": state["topic"],
-                    "language": LANGUAGE_NAMES[lang],
+                    "language": self.prompts.language_names.get(lang, "中文"),
                     "section_title": section.title,
                     "section_description": section.description,
                     "outline_json": outline_json,
