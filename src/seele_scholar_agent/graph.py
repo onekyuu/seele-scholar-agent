@@ -35,7 +35,7 @@ def create_writing_graph(
 
     graph = StateGraph(AgentState)
 
-    graph.add_node("proposer", topic_proposer.propose)
+    graph.add_node("topic_proposer", topic_proposer.propose)
     graph.add_node("researcher", researcher.search)
     graph.add_node("planner", planner.plan)
     graph.add_node("writer", writer.write)
