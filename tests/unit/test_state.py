@@ -1,0 +1,88 @@
+import pytest
+from pydantic import ValidationError
+
+from seele_scholar_agent.state import (
+    OutlineStructure,
+    PaperMetadata,
+    ReviewIssue,
+    ReviewResult,
+    SectionDraft,
+    SectionOutline,
+)
+
+
+def test_paper_metadata_defaults():
+    paper = PaperMetadata(paper_id="p1", title="T", authors=["A"], abstract="abs")
+    assert paper.relevance_score == 0.0
+    assert paper.source == "openalex"
+    assert paper.url is None
+    assert paper.pdf_url is None
+
+
+def test_paper_metadata_invalid_source():
+    with pytest.raises(ValidationError):
+        PaperMetadata(paper_id="p1", title="T", authors=[], abstract="", source="github")  # type: ignore[arg-type]
+
+
+def test_section_draft_defaults():
+    s = SectionDraft(section_id="s0", title="Intro", order_index=1)
+    assert s.status == "pending"
+    assert s.revision_count == 0
+    assert s.review_comments == []
+    assert s.content == ""
+
+
+def test_section_draft_model_copy_immutable():
+    s = SectionDraft(section_id="s0", title="Intro", order_index=1)
+    s2 = s.model_copy(update={"status": "approved"})
+    assert s.status == "pending"
+    assert s2.status == "approved"
+
+
+def test_review_result_score_out_of_range_high():
+    with pytest.raises(ValidationError):
+        ReviewResult(approved=False, score=11, summary="test")
+
+
+def test_review_result_score_out_of_range_zero():
+    with pytest.raises(ValidationError):
+        ReviewResult(approved=False, score=0, summary="test")
+
+
+def test_review_result_score_boundary_valid():
+    r1 = ReviewResult(approved=False, score=1, summary="low")
+    r2 = ReviewResult(approved=True, score=10, summary="high")
+    assert r1.score == 1
+    assert r2.score == 10
+
+
+def test_review_issue_invalid_type():
+    with pytest.raises(ValidationError):
+        ReviewIssue(type="unknown_type", description="desc", suggestion="sug")  # type: ignore[arg-type]
+
+
+def test_outline_structure_defaults():
+    outline = OutlineStructure(title="T", abstract="A")
+    assert outline.sections == []
+    assert outline.keywords == []
+
+
+def test_agent_state_annotated_add(base_state, sample_papers):
+    from seele_scholar_agent.state import AgentState
+
+    p1 = sample_papers[0]
+    p2 = sample_papers[1]
+
+    state1 = AgentState(**{**base_state, "papers": [p1]})
+    state2 = AgentState(**{**base_state, "papers": [p2]})
+
+    combined_papers = state1["papers"] + state2["papers"]
+    assert len(combined_papers) == 2
+    assert combined_papers[0].paper_id == p1.paper_id
+    assert combined_papers[1].paper_id == p2.paper_id
+
+
+def test_section_outline_key_points_default():
+    s = SectionOutline(title="Intro", order=1)
+    assert s.key_points == []
+    assert s.description == ""

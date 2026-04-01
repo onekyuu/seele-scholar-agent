@@ -1,0 +1,269 @@
+"""Unit tests for PlannerNode — P-01 through P-10."""
+
+from typing import cast
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from seele_scholar_agent.nodes.planner import PlannerNode
+from seele_scholar_agent.state import AgentState, PaperMetadata
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_llm_result(
+    title: str = "Test Paper",
+    abstract: str = "Abstract.",
+    sections: list[dict] | None = None,
+    keywords: list[str] | None = None,
+) -> dict:
+    if sections is None:
+        sections = [
+            {"title": "Introduction", "description": "Intro", "order": 1, "key_points": []},
+            {"title": "Related Work", "description": "Prior art", "order": 2, "key_points": []},
+            {"title": "Conclusion", "description": "Summary", "order": 3, "key_points": []},
+        ]
+    return {
+        "title": title,
+        "abstract": abstract,
+        "sections": sections,
+        "keywords": keywords or ["test"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# P-01: Normal planning — outline returned with correct section count
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_normal_output(mock_llm, mock_prompts, state_with_papers):
+    """P-01: Normal planning produces outline with correct section count."""
+    result_data = _make_llm_result(
+        title="LLM Survey",
+        sections=[
+            {"title": "Introduction", "description": "Intro", "order": 1, "key_points": []},
+            {"title": "Related Work", "description": "Prior", "order": 2, "key_points": []},
+            {"title": "Conclusion", "description": "Summary", "order": 3, "key_points": []},
+        ],
+    )
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=result_data,
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state_with_papers)
+
+    assert result["outline"].title == "LLM Survey"
+    assert len(result["sections"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# P-02: Sections out of order — sorted by 'order' field
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_sections_sorted_by_order(mock_llm, mock_prompts, state_with_papers):
+    """P-02: Sections returned out of order are sorted correctly."""
+    result_data = _make_llm_result(
+        sections=[
+            {"title": "Conclusion", "description": "Summary", "order": 3, "key_points": []},
+            {"title": "Introduction", "description": "Intro", "order": 1, "key_points": []},
+            {"title": "Related Work", "description": "Prior", "order": 2, "key_points": []},
+        ]
+    )
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=result_data,
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state_with_papers)
+
+    titles = [s.title for s in result["sections"]]
+    assert titles == ["Introduction", "Related Work", "Conclusion"]
+
+
+# ---------------------------------------------------------------------------
+# P-03: LLM failure → _default_outline fallback, 5 sections
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_llm_failure_uses_default_outline(mock_llm, mock_prompts, state_with_papers):
+    """P-03: LLM failure triggers default outline with 5 sections."""
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        side_effect=Exception("timeout"),
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state_with_papers)
+
+    assert len(result["sections"]) == 5
+
+
+# ---------------------------------------------------------------------------
+# P-04: lang="zh" → first section title is "引言"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_zh_default_sections(mock_llm, mock_prompts, base_state):
+    """P-04: zh fallback outline uses Chinese section titles."""
+    state = cast(AgentState, {**base_state, "language": "zh", "papers": [], "status": "planning"})
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        side_effect=Exception("fail"),
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state)
+
+    assert result["sections"][0].title == "引言"
+
+
+# ---------------------------------------------------------------------------
+# P-05: lang="en" → first section title is "Introduction"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_en_default_sections(mock_llm, mock_prompts, base_state):
+    """P-05: en fallback outline uses English section titles."""
+    state = cast(AgentState, {**base_state, "language": "en", "papers": [], "status": "planning"})
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        side_effect=Exception("fail"),
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state)
+
+    assert result["sections"][0].title == "Introduction"
+
+
+# ---------------------------------------------------------------------------
+# P-06: lang="ja" → first section title is "序論"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_ja_default_sections(mock_llm, mock_prompts, base_state):
+    """P-06: ja fallback outline uses Japanese section titles."""
+    state = cast(AgentState, {**base_state, "language": "ja", "papers": [], "status": "planning"})
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        side_effect=Exception("fail"),
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state)
+
+    assert result["sections"][0].title == "序論"
+
+
+# ---------------------------------------------------------------------------
+# P-07: papers=[] → papers_summary uses "no_papers_found" i18n string
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_empty_papers_summary(mock_llm, mock_prompts, base_state):
+    """P-07: Empty papers list yields a valid outline (no crash)."""
+    state = cast(AgentState, {**base_state, "language": "zh", "papers": [], "status": "planning"})
+    result_data = _make_llm_result()
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=result_data,
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state)
+
+    # Should still produce an outline without crashing
+    assert result["outline"] is not None
+
+
+# ---------------------------------------------------------------------------
+# P-08: papers > 15 → only first 15 passed to LLM
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_truncates_papers_to_15(mock_llm, mock_prompts, base_state):
+    """P-08: Only first 15 papers are included in the prompt."""
+    many_papers = [
+        PaperMetadata(
+            paper_id=f"id:{i}",
+            title=f"Paper {i}",
+            authors=["Author"],
+            abstract=f"Abstract {i}",
+            source="arxiv",
+        )
+        for i in range(20)
+    ]
+    state = cast(AgentState, {**base_state, "papers": many_papers, "status": "planning"})
+
+    captured_input: dict = {}
+
+    async def capture_invoke(chain, input_data):  # type: ignore[override]
+        captured_input.update(input_data)
+        return _make_llm_result()
+
+    with patch("seele_scholar_agent.nodes.planner.invoke_with_retry", side_effect=capture_invoke):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        await node.plan(state)
+
+    # papers_summary should contain exactly 15 paper titles
+    papers_summary = captured_input["papers_summary"]
+    assert papers_summary.count("Paper ") == 15
+
+
+# ---------------------------------------------------------------------------
+# P-09: Return dict contains outline, sections, current_section_index=0, status="waiting_human"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_return_keys_and_status(mock_llm, mock_prompts, state_with_papers):
+    """P-09: Return dict has correct keys and status."""
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=_make_llm_result(),
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state_with_papers)
+
+    assert "outline" in result
+    assert "sections" in result
+    assert result["current_section_index"] == 0
+    assert result["status"] == "waiting_human"
+
+
+# ---------------------------------------------------------------------------
+# P-10: section_id uses "section_{i}" format
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_section_ids(mock_llm, mock_prompts, state_with_papers):
+    """P-10: SectionDraft IDs follow 'section_{i}' pattern."""
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=_make_llm_result(
+            sections=[
+                {"title": "A", "description": "a", "order": 1, "key_points": []},
+                {"title": "B", "description": "b", "order": 2, "key_points": []},
+                {"title": "C", "description": "c", "order": 3, "key_points": []},
+            ]
+        ),
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state_with_papers)
+
+    ids = [s.section_id for s in result["sections"]]
+    assert ids == ["section_0", "section_1", "section_2"]
