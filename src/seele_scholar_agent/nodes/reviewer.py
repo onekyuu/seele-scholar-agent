@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,7 +11,7 @@ from ..config import settings
 from ..i18n import t
 from ..logging import get_logger
 from ..state import AgentState, PaperMetadata, ReviewIssue, ReviewResult
-from . import CITATION_PATTERN, invoke_with_retry
+from . import CITATION_PATTERN, NodeStreamEvent, _stream_llm_text, invoke_with_retry
 
 logger = get_logger(__name__)
 
@@ -46,6 +47,7 @@ class ReviewerNode:
         )
         self.parser = JsonOutputParser()
         self.chain = self.prompt | self.llm | self.parser
+        self.stream_chain = self.prompt | self.llm
         self.citation_chain = self.citation_alignment_prompt | self.llm | self.parser
 
     async def review(self, state: AgentState) -> dict[str, Any]:
@@ -115,6 +117,84 @@ class ReviewerNode:
         if review.approved:
             return await self._handle_approved(state, section, review, record)
         return await self._handle_rejected(state, section, review, record)
+
+    async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
+        sections = state["sections"]
+        index = state["current_section_index"]
+        lang = state.get("language", "zh")
+
+        if index >= len(sections):
+            yield NodeStreamEvent(
+                type="result",
+                result={"status": "failed", "error_message": "Review index out of bounds"},
+            )
+            return
+
+        section = sections[index]
+        yield NodeStreamEvent(type="progress", progress=f"reviewing:{section.title}")
+
+        input_data = {
+            "topic": state["topic"],
+            "section_title": section.title,
+            "content": section.content,
+        }
+
+        full_text = ""
+        async for event in _stream_llm_text(self.stream_chain, input_data):
+            full_text += event.get("token", "")
+            yield event
+
+        try:
+            result = self.parser.parse(full_text)
+            review = ReviewResult(
+                approved=result.get("approved", False),
+                score=result.get("score", 5),
+                issues=[ReviewIssue(**i) for i in result.get("issues", [])],
+                summary=result.get("summary", ""),
+            )
+        except Exception as e:
+            logger.error("review stream parse failed", error=str(e))
+            review = ReviewResult(
+                approved=False,
+                score=5,
+                issues=[
+                    ReviewIssue(
+                        type="other", description=str(e), suggestion=t(lang, "review_error_retry")
+                    )
+                ],
+                summary=t(lang, "review_error_summary"),
+            )
+
+        citation_issues = self._verify_citations(section.content, state.get("papers", []))
+        if citation_issues:
+            review.issues.extend(citation_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
+
+        papers = state.get("papers", [])
+        if papers and section.content:
+            yield NodeStreamEvent(type="progress", progress="verifying_citations")
+            alignment_issues = await self._verify_citation_alignment(
+                section.title, section.content, papers
+            )
+            if alignment_issues:
+                review.issues.extend(alignment_issues)
+                if review.approved:
+                    review = review.model_copy(update={"approved": False})
+
+        record = {
+            "section": section.title,
+            "score": review.score,
+            "approved": review.approved,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+        if review.approved:
+            final_result = await self._handle_approved(state, section, review, record)
+        else:
+            final_result = await self._handle_rejected(state, section, review, record)
+
+        yield NodeStreamEvent(type="result", result=final_result)
 
     def _verify_citations(self, content: str, papers: list[PaperMetadata]) -> list[ReviewIssue]:
         cited_numbers = {int(m) for m in CITATION_PATTERN.findall(content)}

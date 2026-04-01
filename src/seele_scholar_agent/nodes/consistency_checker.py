@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.output_parsers import JsonOutputParser
@@ -7,7 +8,7 @@ from langchain_openai import ChatOpenAI
 from ..agent_config import PromptsConfig
 from ..logging import get_logger
 from ..state import AgentState, ConsistencyIssue, SectionDraft
-from . import invoke_with_retry
+from . import NodeStreamEvent, _stream_llm_text, invoke_with_retry
 
 logger = get_logger(__name__)
 
@@ -37,6 +38,7 @@ class ConsistencyCheckerNode:
         )
         self.parser = JsonOutputParser()
         self.chain = self.prompt | self.llm | self.parser
+        self.stream_chain = self.prompt | self.llm
 
     async def check(self, state: AgentState) -> dict[str, Any]:
         sections = state.get("sections", [])
@@ -72,3 +74,45 @@ class ConsistencyCheckerNode:
 
         logger.info("consistency check completed", issues_found=len(issues))
         return {"consistency_checked": True, "consistency_issues": issues}
+
+    async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
+        sections = state.get("sections", [])
+        approved = [s for s in sections if s.status in ("approved", "auto_generated")]
+
+        if len(approved) < 2:
+            yield NodeStreamEvent(
+                type="result",
+                result={"consistency_checked": True, "consistency_issues": []},
+            )
+            return
+
+        sections_summary = _build_sections_summary(approved)
+        yield NodeStreamEvent(type="progress", progress="checking_consistency")
+
+        input_data = {"topic": state["topic"], "sections_summary": sections_summary}
+
+        full_text = ""
+        async for event in _stream_llm_text(self.stream_chain, input_data):
+            full_text += event.get("token", "")
+            yield event
+
+        try:
+            result = self.parser.parse(full_text)
+            raw_issues = result.get("issues", [])
+            issues = [
+                ConsistencyIssue(
+                    issue_type=item.get("issue_type", "other"),
+                    description=item.get("description", ""),
+                    sections_involved=item.get("sections_involved", []),
+                    suggestion=item.get("suggestion", ""),
+                )
+                for item in raw_issues
+            ]
+        except Exception as e:
+            logger.error("consistency check stream parse failed", error=str(e))
+            issues = []
+
+        yield NodeStreamEvent(
+            type="result",
+            result={"consistency_checked": True, "consistency_issues": issues},
+        )

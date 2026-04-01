@@ -1,9 +1,10 @@
 import re
+from collections.abc import AsyncIterator
 from typing import Any
 
 from ..logging import get_logger
 from ..state import AgentState, PaperMetadata, ReferenceEntry
-from . import CITATION_PATTERN
+from . import CITATION_PATTERN, NodeStreamEvent
 
 logger = get_logger(__name__)
 
@@ -81,3 +82,8 @@ class ReferenceGeneratorNode:
 
         logger.info("references generated", count=len(entries))
         return {"references": entries, "status": "completed"}
+
+    async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
+        yield NodeStreamEvent(type="progress", progress="generating_references")
+        result = await self.generate(state)
+        yield NodeStreamEvent(type="result", result=result)

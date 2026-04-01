@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -7,7 +8,7 @@ from ..agent_config import PromptsConfig, RAGRetrieverFunc
 from ..i18n import t
 from ..logging import get_logger
 from ..state import AgentState, PaperMetadata, SectionDraft
-from . import PREVIOUS_SECTION_MAX_CHARS, invoke_with_retry
+from . import PREVIOUS_SECTION_MAX_CHARS, NodeStreamEvent, _stream_llm_text, invoke_with_retry
 
 logger = get_logger(__name__)
 
@@ -94,6 +95,70 @@ class WriterNode:
         )
 
         return {"sections": updated_sections, "status": "reviewing"}
+
+    async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
+        sections = state["sections"]
+        current_index = state["current_section_index"]
+        lang = state.get("language", "zh")
+
+        if current_index >= len(sections):
+            yield NodeStreamEvent(
+                type="result",
+                result={
+                    "status": "completed",
+                    "sections_completed": state.get("sections_completed", []),
+                },
+            )
+            return
+
+        section = sections[current_index]
+
+        if section.status == "approved":
+            result = await self._move_to_next(state)
+            yield NodeStreamEvent(type="result", result=result)
+            return
+
+        yield NodeStreamEvent(type="progress", progress=f"writing:{section.title}")
+
+        if self.rag_retriever:
+            search_query = f"{state['topic']} {section.title} {section.description}"
+            rag_chunks = await self.rag_retriever(search_query)
+            rag_context = self._build_rag_context(rag_chunks)
+        else:
+            rag_context = self._build_rag_context(state.get("rag_context"))
+
+        input_data = {
+            "topic": state["topic"],
+            "language": t(lang, "language_name"),
+            "section_title": section.title,
+            "section_description": section.description,
+            "outline_json": self._build_outline_json(state.get("outline")),
+            "previous_sections": self._build_previous_sections_context(sections, current_index),
+            "numbered_papers": self._build_numbered_papers(state.get("papers", [])),
+            "rag_context": rag_context,
+            "review_comments": self._build_review_comments(section),
+        }
+
+        full_text = ""
+        async for event in _stream_llm_text(self.chain, input_data):
+            full_text += event.get("token", "")
+            yield event
+
+        content = self._clean_content(full_text)
+
+        updated_sections = sections.copy()
+        updated_sections[current_index] = section.model_copy(
+            update={
+                "content": content,
+                "status": "review",
+                "revision_count": section.revision_count,
+            }
+        )
+
+        yield NodeStreamEvent(
+            type="result",
+            result={"sections": updated_sections, "status": "reviewing"},
+        )
 
     def _build_outline_json(self, outline: Any) -> str:
         if not outline:

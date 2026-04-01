@@ -1,5 +1,6 @@
 import asyncio
 import unicodedata
+from collections.abc import AsyncIterator
 from typing import Any
 
 from httpx import AsyncClient, HTTPStatusError
@@ -8,7 +9,13 @@ from langchain_core.language_models import BaseLanguageModel
 from seele_scholar_agent.state import AgentState, PaperMetadata
 
 from ..logging import get_logger
-from . import API_MAX_RETRIES, API_RETRY_BASE_DELAY, ARXIV_RATE_LIMIT_DELAY, HTTP_TIMEOUT
+from . import (
+    API_MAX_RETRIES,
+    API_RETRY_BASE_DELAY,
+    ARXIV_RATE_LIMIT_DELAY,
+    HTTP_TIMEOUT,
+    NodeStreamEvent,
+)
 from .prompts import TOPIC_TRANSLATION_SYSTEM_PROMPT, TOPIC_TRANSLATION_USER_PROMPT
 
 logger = get_logger(__name__)
@@ -394,3 +401,39 @@ class ResearcherNode:
             "search_queries": queries,
             "status": "planning",
         }
+
+    async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
+        topic = state["topic"]
+
+        yield NodeStreamEvent(type="progress", progress="translating")
+        queries = await self._translate_topic(topic)
+
+        all_papers: list[PaperMetadata] = []
+        seen_ids: set[str] = set()
+
+        for query in queries:
+            yield NodeStreamEvent(type="progress", progress=f"searching_openalex_ss:{query}")
+            openalex_papers, ss_papers = await asyncio.gather(
+                self.openalex.search(query),
+                self.ss.search(query),
+            )
+
+            yield NodeStreamEvent(type="progress", progress=f"searching_arxiv:{query}")
+            await asyncio.sleep(ARXIV_RATE_LIMIT_DELAY)
+            arxiv_papers = await self.arxiv.search(query)
+
+            for paper in [*openalex_papers, *ss_papers, *arxiv_papers]:
+                if paper.paper_id not in seen_ids:
+                    seen_ids.add(paper.paper_id)
+                    all_papers.append(paper)
+
+        all_papers.sort(key=lambda x: x.relevance_score, reverse=True)
+
+        yield NodeStreamEvent(
+            type="result",
+            result={
+                "papers": all_papers,
+                "search_queries": queries,
+                "status": "planning",
+            },
+        )

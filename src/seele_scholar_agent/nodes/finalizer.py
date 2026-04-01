@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -7,7 +8,7 @@ from ..agent_config import PromptsConfig
 from ..i18n import t
 from ..logging import get_logger
 from ..state import AgentState, SectionDraft
-from . import invoke_with_retry
+from . import NodeStreamEvent, _stream_llm_text, invoke_with_retry
 
 logger = get_logger(__name__)
 
@@ -62,7 +63,12 @@ class FinalizerNode:
             if _is_abstract_section(section.title):
                 section_type = t(lang, "language_abstract")
             elif _is_conclusion_section(section.title):
-                section_type = "结论" if lang == "zh" else "Conclusion" if lang == "en" else "結論"
+                if lang == "zh":
+                    section_type = "结论"
+                elif lang == "en":
+                    section_type = "Conclusion"
+                else:
+                    section_type = "結論"
             else:
                 continue
 
@@ -92,3 +98,54 @@ class FinalizerNode:
             return {"status": "completed"}
 
         return {"sections": updated_sections, "status": "completed"}
+
+    async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
+        sections = state.get("sections", [])
+        lang = state.get("language", "zh")
+        topic = state["topic"]
+
+        completed_summary = _build_completed_sections_summary(sections)
+        updated_sections = list(sections)
+        modified = False
+
+        for i, section in enumerate(updated_sections):
+            if section.status != "pending":
+                continue
+            if _is_abstract_section(section.title):
+                section_type = t(lang, "language_abstract")
+            elif _is_conclusion_section(section.title):
+                if lang == "zh":
+                    section_type = "结论"
+                elif lang == "en":
+                    section_type = "Conclusion"
+                else:
+                    section_type = "結論"
+            else:
+                continue
+
+            yield NodeStreamEvent(type="progress", progress=f"finalizing:{section.title}")
+
+            input_data = {
+                "topic": topic,
+                "language": t(lang, "language_name"),
+                "section_type": section_type,
+                "completed_sections": completed_summary,
+            }
+
+            full_text = ""
+            try:
+                async for event in _stream_llm_text(self.chain, input_data):
+                    full_text += event.get("token", "")
+                    yield event
+                updated_sections[i] = section.model_copy(
+                    update={"content": full_text.strip(), "status": "auto_generated"}
+                )
+                modified = True
+            except Exception as e:
+                logger.error("finalizer stream failed", section=section.title, error=str(e))
+
+        final: dict[str, Any] = {"status": "completed"}
+        if modified:
+            final["sections"] = updated_sections
+
+        yield NodeStreamEvent(type="result", result=final)
