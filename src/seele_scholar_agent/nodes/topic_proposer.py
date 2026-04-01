@@ -5,6 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from ..agent_config import PromptsConfig
+from ..i18n import t
 from ..logging import get_logger
 from ..state import AgentState, ProposedTopic
 from .researcher import SemanticScholarRetriever
@@ -14,9 +15,9 @@ logger = get_logger(__name__)
 
 class TopicProposerNode:
     def __init__(
-        self, model: ChatOpenAI, prompts: PromptsConfig, senmatic_scholar_key: str | None = None
+        self, llm: ChatOpenAI, prompts: PromptsConfig, senmatic_scholar_key: str | None = None
     ):
-        self.model = model
+        self.llm = llm
         self.prompts = prompts
         self.retriever = SemanticScholarRetriever(api_key=senmatic_scholar_key, top_k=5)
 
@@ -27,7 +28,7 @@ class TopicProposerNode:
             ]
         )
         self.parser = JsonOutputParser()
-        self.chain = self.prompt | self.model | self.parser
+        self.chain = self.prompt | self.llm | self.parser
 
     async def propose(self, state: AgentState) -> dict[str, Any]:
         broad_topic = state["topic"]
@@ -46,7 +47,7 @@ class TopicProposerNode:
                 [f"- **{p.title}** ({p.authors[0]}等): {p.abstract[:200]}..." for p in broad_papers]
             )
         else:
-            papers_summary = "未检索到最新文献，请直接基于常识进行推演。"
+            papers_summary = t(lang, "no_recent_papers")
 
         logger.info("正在基于研究趋势生成具体选题...")
 
@@ -55,7 +56,7 @@ class TopicProposerNode:
                 {
                     "topic": broad_topic,
                     "papers_summary": papers_summary,
-                    "language": self.prompts.language_names.get(lang, "中文"),
+                    "language": t(lang, "language_name"),
                 }
             )
 

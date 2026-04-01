@@ -107,6 +107,19 @@ REVIEWER_USER_PROMPT = """请审阅以下论文章节：
 
 如果 score >= 7 且 issues 为空，approved 应为 true。"""
 
+TOPIC_TRANSLATION_SYSTEM_PROMPT = """You are an academic search query expert. Your task is to translate a non-English research topic into English academic search queries."""
+
+TOPIC_TRANSLATION_USER_PROMPT = """Translate the following research topic into English academic search queries.
+
+Requirements:
+1. Generate 3-5 distinct English search query variants
+2. Use standard academic terminology (e.g. 注意力机制 → "attention mechanism", NOT "focus mechanism")
+3. Consider synonyms and alternative phrasings commonly used in academic literature
+4. Keep each query concise (2-6 words), suitable for database search
+5. Output one query per line, no numbering, no bullets, no explanations
+
+Research topic: {topic}"""
+
 TOPIC_PROPOSER_SYSTEM_PROMPT = """
 你是一位顶尖的学术导师。你的任务是帮助学生将一个【宽泛的研究方向】收敛为具体、有价值的【论文选题】。
 你需要阅读该领域最新的几篇相关文献，总结当前的研究趋势（如：大家都在解决什么痛点、用了什么新方法），然后基于这些趋势，提出 3 个具体的可行选题。

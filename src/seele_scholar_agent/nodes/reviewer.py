@@ -6,6 +6,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from ..config import settings
+from ..i18n import t
 from ..logging import get_logger
 from ..state import AgentState, ReviewIssue, ReviewResult
 from ..agent_config import PromptsConfig
@@ -14,8 +15,8 @@ logger = get_logger(__name__)
 
 
 class ReviewerNode:
-    def __init__(self, model: ChatOpenAI, prompts: PromptsConfig):
-        self.model = model
+    def __init__(self, llm: ChatOpenAI, prompts: PromptsConfig):
+        self.llm = llm
         self.prompts = prompts
         self.prompt = ChatPromptTemplate.from_messages(
             [
@@ -24,12 +25,13 @@ class ReviewerNode:
             ]
         )
         self.parser = JsonOutputParser()
-        self.chain = self.prompt | self.model | self.parser
+        self.chain = self.prompt | self.llm | self.parser
 
     async def review(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]
         index = state["current_section_index"]
         section = sections[index]
+        lang = state.get("language", "zh")
 
         logger.info(f"Reviewing section: {section.title}")
 
@@ -52,8 +54,12 @@ class ReviewerNode:
             review = ReviewResult(
                 approved=False,
                 score=5,
-                issues=[ReviewIssue(type="other", description=str(e), suggestion="请重试")],
-                summary="审稿过程发生错误",
+                issues=[
+                    ReviewIssue(
+                        type="other", description=str(e), suggestion=t(lang, "review_error_retry")
+                    )
+                ],
+                summary=t(lang, "review_error_summary"),
             )
 
         record = {
@@ -99,6 +105,7 @@ class ReviewerNode:
         index = state["current_section_index"]
         revision_count = state.get("revision_count", 0)
         max_revisions = state.get("max_revisions", settings.MAX_REVISIONS)
+        lang = state.get("language", "zh")
 
         if revision_count >= max_revisions:
             logger.warning("Max revisions reached, forcing approval")
@@ -107,12 +114,14 @@ class ReviewerNode:
             return {"sections": updated, "review_history": [record], "status": "completed"}
 
         comments = [
-            f"【第 {section.revision_count} 轮审稿】评分：{review.score}/10",
-            f"意见: {review.summary}",
+            t(lang, "review_round", round=section.revision_count, score=review.score),
+            t(lang, "review_opinion", summary=review.summary),
         ]
         for i, issue in enumerate(review.issues, 1):
-            comments.append(f"问题 {i}: [{issue.type}] {issue.description}")
-            comments.append(f"建议: {issue.suggestion}")
+            comments.append(
+                t(lang, "review_issue", i=i, type=issue.type, description=issue.description)
+            )
+            comments.append(t(lang, "review_suggestion", suggestion=issue.suggestion))
 
         updated = sections.copy()
         updated[index] = section.model_copy(

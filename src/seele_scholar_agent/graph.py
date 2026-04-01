@@ -21,17 +21,17 @@ def create_writing_graph(
     prompts: PromptsConfig,
     rag_retriever: RAGRetrieverFunc | None,
     semantic_scholar_key: str | None = None,
-    openalex_email: str | None = None
+    openalex_email: str | None = None,
 ) -> CompiledStateGraph:
-    topic_proposer = TopicProposerNode(model=model, prompts=prompts)
+    topic_proposer = TopicProposerNode(llm=model, prompts=prompts)
     researcher = ResearcherNode(
+        llm=model,
         semantic_scholar_key=semantic_scholar_key or settings.SEMANTIC_SCHOLAR_API_KEY,
-        openalex_email=openalex_email
+        openalex_email=openalex_email,
     )
-    planner = PlannerNode(model=model, prompts=prompts)
-
-    writer = WriterNode(model=model, prompts=prompts, rag_retriever=rag_retriever)
-    reviewer = ReviewerNode(model=model, prompts=prompts)
+    planner = PlannerNode(llm=model, prompts=prompts)
+    writer = WriterNode(llm=model, prompts=prompts, rag_retriever=rag_retriever)
+    reviewer = ReviewerNode(llm=model, prompts=prompts)
 
     graph = StateGraph(AgentState)
 
@@ -68,16 +68,17 @@ def create_simple_writing_graph(
     prompts: PromptsConfig,
     rag_retriever: RAGRetrieverFunc | None = None,
     semantic_scholar_key: str | None = None,
-    openalex_email: str | None = None
+    openalex_email: str | None = None,
 ) -> CompiledStateGraph:
-    topic_proposer = TopicProposerNode(model=model, prompts=prompts)
+    topic_proposer = TopicProposerNode(llm=model, prompts=prompts)
     researcher = ResearcherNode(
+        llm=model,
         semantic_scholar_key=semantic_scholar_key or settings.SEMANTIC_SCHOLAR_API_KEY,
-        openalex_email=openalex_email
+        openalex_email=openalex_email,
     )
-    planner = PlannerNode(model=model, prompts=prompts)
-    writer = WriterNode(model=model, prompts=prompts, rag_retriever=rag_retriever)
-    reviewer = ReviewerNode(model=model, prompts=prompts)
+    planner = PlannerNode(llm=model, prompts=prompts)
+    writer = WriterNode(llm=model, prompts=prompts, rag_retriever=rag_retriever)
+    reviewer = ReviewerNode(llm=model, prompts=prompts)
 
     graph = StateGraph(AgentState)
 

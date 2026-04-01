@@ -1,11 +1,14 @@
 import asyncio
+import unicodedata
 from typing import Any
 
 from httpx import AsyncClient, HTTPStatusError
+from langchain_core.language_models import BaseLanguageModel
 
 from seele_scholar_agent.state import AgentState, PaperMetadata
 
 from ..logging import get_logger
+from .prompts import TOPIC_TRANSLATION_SYSTEM_PROMPT, TOPIC_TRANSLATION_USER_PROMPT
 
 logger = get_logger(__name__)
 
@@ -230,38 +233,110 @@ class SemanticScholarRetriever:
 class ResearcherNode:
     def __init__(
         self,
+        llm: BaseLanguageModel | None = None,
         qdrant_client=None,
         embedding_model=None,
         semantic_scholar_key: str | None = None,
         openalex_email: str | None = None,
     ):
+        self.llm = llm
         self.arxiv = ArxivRetriever()
         self.openalex = OpenAlexRetriever(email=openalex_email)
         self.ss = SemanticScholarRetriever(api_key=semantic_scholar_key)
         self.qdrant = qdrant_client
         self.embedding = embedding_model
 
+    def _needs_translation(self, topic: str) -> bool:
+        for ch in topic:
+            cp = ord(ch)
+            # CJK Unified Ideographs (Chinese)
+            if 0x4E00 <= cp <= 0x9FFF:
+                return True
+            # Hiragana / Katakana (Japanese)
+            if 0x3040 <= cp <= 0x30FF:
+                return True
+            # Hangul (Korean)
+            if 0xAC00 <= cp <= 0xD7A3:
+                return True
+            # Full-width / other non-ASCII that aren't Latin-extended
+            if cp > 0x024F and unicodedata.category(ch) not in ("Po", "Pd", "Ps", "Pe", "Zs"):
+                return True
+        return False
+
+    async def _translate_topic(self, topic: str) -> list[str]:
+        if not self._needs_translation(topic):
+            logger.info("topic is already English, skipping translation", topic=topic)
+            return [topic]
+
+        if self.llm is None:
+            logger.warning(
+                "no LLM injected into ResearcherNode; skipping translation, "
+                "search quality may be reduced for non-English topics",
+                topic=topic,
+            )
+            return [topic]
+
+        try:
+            from langchain_core.messages import HumanMessage, SystemMessage
+
+            messages = [
+                SystemMessage(content=TOPIC_TRANSLATION_SYSTEM_PROMPT),
+                HumanMessage(content=TOPIC_TRANSLATION_USER_PROMPT.format(topic=topic)),
+            ]
+            response = await self.llm.ainvoke(messages)
+            raw = response.content if hasattr(response, "content") else str(response)
+            queries = [line.strip() for line in raw.strip().splitlines() if line.strip()]
+            if queries:
+                logger.info(
+                    "topic translated to English queries",
+                    original=topic,
+                    queries=queries,
+                )
+                return queries
+            logger.warning("LLM returned empty translation, falling back to original", topic=topic)
+        except Exception as e:
+            logger.error(
+                "topic translation failed, falling back to original", topic=topic, error=str(e)
+            )
+
+        return [topic]
+
     async def search(self, state: AgentState) -> dict[str, Any]:
         topic = state["topic"]
-        all_papers = []
 
-        logger.info(f"Searching OpenAlex for topic: {topic}")
-        openalex_papers = await self.openalex.search(topic)
-        all_papers.extend(openalex_papers)
+        queries = await self._translate_topic(topic)
 
-        logger.info(f"Searching Semantic Scholar for topic: {topic}")
-        ss_papers = await self.ss.search(topic)
-        all_papers.extend(ss_papers)
+        all_papers: list[PaperMetadata] = []
+        seen_ids: set[str] = set()
 
-        logger.info(f"Searching ArXiv for topic: {topic} (waiting 3s for rate limit)")
-        await asyncio.sleep(3)
-        arxiv_papers = await self.arxiv.search(topic)
-        all_papers.extend(arxiv_papers)
+        for query in queries:
+            logger.info("searching all sources", query=query)
 
-        seen_ids = set()
-        unique_papers = [
-            p for p in all_papers if p.paper_id not in seen_ids and not seen_ids.add(p.paper_id)
-        ]
-        unique_papers.sort(key=lambda x: x.relevance_score, reverse=True)
+            openalex_papers, ss_papers = await asyncio.gather(
+                self.openalex.search(query),
+                self.ss.search(query),
+            )
 
-        return {"papers": unique_papers, "status": "planning"}
+            logger.info("searching ArXiv (with rate-limit delay)", query=query)
+            await asyncio.sleep(3)
+            arxiv_papers = await self.arxiv.search(query)
+
+            for paper in [*openalex_papers, *ss_papers, *arxiv_papers]:
+                if paper.paper_id not in seen_ids:
+                    seen_ids.add(paper.paper_id)
+                    all_papers.append(paper)
+
+        all_papers.sort(key=lambda x: x.relevance_score, reverse=True)
+
+        logger.info(
+            "research complete",
+            topic=topic,
+            queries=queries,
+            total_papers=len(all_papers),
+        )
+
+        return {
+            "papers": all_papers,
+            "search_queries": queries,
+            "status": "planning",
+        }

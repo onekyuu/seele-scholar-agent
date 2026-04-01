@@ -4,6 +4,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from ..agent_config import PromptsConfig, RAGRetrieverFunc
+from ..i18n import t
 from ..logging import get_logger
 from ..state import AgentState
 
@@ -11,14 +12,16 @@ logger = get_logger(__name__)
 
 
 class WriterNode:
-    def __init__(self, model: ChatOpenAI, prompts: PromptsConfig, rag_retriever: RAGRetrieverFunc | None = None):
-        self.model = model
+    def __init__(
+        self, llm: ChatOpenAI, prompts: PromptsConfig, rag_retriever: RAGRetrieverFunc | None = None
+    ):
+        self.llm = llm
         self.prompts = prompts
         self.rag_retriever = rag_retriever
         self.prompt = ChatPromptTemplate.from_messages(
             [("system", prompts.writer_system_prompt), ("user", prompts.writer_user_prompt)]
         )
-        self.chain = self.prompt | self.model
+        self.chain = self.prompt | self.llm
 
     async def write(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]
@@ -52,7 +55,7 @@ class WriterNode:
             result = await self.chain.ainvoke(
                 {
                     "topic": state["topic"],
-                    "language": self.prompts.language_names.get(lang, "中文"),
+                    "language": t(lang, "language_name"),
                     "section_title": section.title,
                     "section_description": section.description,
                     "outline_json": outline_json,
