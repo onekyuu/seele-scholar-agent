@@ -8,6 +8,7 @@ from ..agent_config import PromptsConfig
 from ..i18n import t, t_list
 from ..logging import get_logger
 from ..state import AgentState, OutlineStructure, SectionDraft, SectionOutline
+from . import invoke_with_retry
 
 logger = get_logger(__name__)
 
@@ -35,13 +36,14 @@ class PlannerNode:
         ) or t(lang, "no_papers_found")
 
         logger.info(
-            "Generating outline with planner",
+            "generating outline",
             topic=topic,
             language=lang,
             paper_count=len(papers),
         )
         try:
-            result = await self.chain.ainvoke(
+            result = await invoke_with_retry(
+                self.chain,
                 {
                     "topic": topic,
                     "papers_summary": papers_summary,
@@ -50,10 +52,10 @@ class PlannerNode:
                     "title_placeholder": t(lang, "language_title"),
                     "abstract_placeholder": t(lang, "language_abstract"),
                     "keyword_placeholder": t(lang, "language_keywords"),
-                }
+                },
             )
         except Exception as e:
-            logger.error(f"LLM planning failed: {e}")
+            logger.error("LLM planning failed after retries", error=str(e))
             result = self._default_outline(topic, lang)
 
         outline = OutlineStructure(
@@ -81,7 +83,7 @@ class PlannerNode:
             for i, s in enumerate(sorted(outline.sections, key=lambda x: x.order))
         ]
 
-        logger.info(f"Generated outline with {len(outline.sections)} sections", topic=topic)
+        logger.info("outline generated", topic=topic, section_count=len(outline.sections))
 
         return {
             "outline": outline,
@@ -90,7 +92,7 @@ class PlannerNode:
             "status": "waiting_human",
         }
 
-    def _default_outline(self, topic: str, lang: str = "zh") -> dict:
+    def _default_outline(self, topic: str, lang: str = "zh") -> dict[str, Any]:
         sections_titles = t_list(lang, "default_sections")
         section_descs = t_list(lang, "default_section_descs")
         title = t(lang, "default_paper_title", topic=topic)

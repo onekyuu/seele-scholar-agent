@@ -8,6 +8,7 @@ from ..agent_config import PromptsConfig
 from ..i18n import t
 from ..logging import get_logger
 from ..state import AgentState, ProposedTopic
+from . import invoke_with_retry
 from .researcher import SemanticScholarRetriever
 
 logger = get_logger(__name__)
@@ -33,13 +34,12 @@ class TopicProposerNode:
     async def propose(self, state: AgentState) -> dict[str, Any]:
         broad_topic = state["topic"]
         lang = state.get("language", "zh")
-        logger.info(f"正在为宽泛主题进行前置检索探索: {broad_topic}")
+        logger.info("exploring broad topic with pre-search", topic=broad_topic)
 
         try:
             broad_papers = await self.retriever.search(broad_topic)
-
         except Exception as e:
-            logger.error(f"前置检索失败：{e}")
+            logger.error("pre-search failed", error=str(e))
             broad_papers = []
 
         if broad_papers:
@@ -49,20 +49,21 @@ class TopicProposerNode:
         else:
             papers_summary = t(lang, "no_recent_papers")
 
-        logger.info("正在基于研究趋势生成具体选题...")
+        logger.info("generating specific topics from research trends")
 
         try:
-            result = await self.chain.ainvoke(
+            result = await invoke_with_retry(
+                self.chain,
                 {
                     "topic": broad_topic,
                     "papers_summary": papers_summary,
                     "language": t(lang, "language_name"),
-                }
+                },
             )
 
-            proposed_topics = [ProposedTopic(**t) for t in result.get("topics", [])]
+            proposed_topics = [ProposedTopic(**item) for item in result.get("topics", [])]
         except Exception as e:
-            logger.error(f"选题生成失败: {e}")
+            logger.error("topic generation failed after retries", error=str(e))
             proposed_topics = []
 
         return {

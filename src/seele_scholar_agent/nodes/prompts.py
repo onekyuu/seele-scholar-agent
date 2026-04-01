@@ -1,27 +1,3 @@
-LANGUAGE_NAMES = {
-    "zh": "中文",
-    "en": "英文",
-    "ja": "日文",
-}
-
-LANGUAGE_TITLES = {
-    "zh": "论文标题",
-    "en": "Paper Title",
-    "ja": "論文タイトル",
-}
-
-LANGUAGE_ABSTRACT = {
-    "zh": "摘要",
-    "en": "Abstract",
-    "ja": "要約",
-}
-
-LANGUAGE_KEYWORDS = {
-    "zh": "关键词",
-    "en": "Keywords",
-    "ja": "キーワード",
-}
-
 PLANNER_SYSTEM_PROMPT = """你是一位资深的学术论文大纲规划师。根据给定的研究主题和检索到的相关文献，生成一份{language}的{language_title}大纲。
 
 要求：

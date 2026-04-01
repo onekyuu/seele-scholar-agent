@@ -5,11 +5,12 @@ from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
+from ..agent_config import PromptsConfig
 from ..config import settings
 from ..i18n import t
 from ..logging import get_logger
-from ..state import AgentState, ReviewIssue, ReviewResult
-from ..agent_config import PromptsConfig
+from ..state import AgentState, PaperMetadata, ReviewIssue, ReviewResult
+from . import CITATION_PATTERN, invoke_with_retry
 
 logger = get_logger(__name__)
 
@@ -30,18 +31,24 @@ class ReviewerNode:
     async def review(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]
         index = state["current_section_index"]
-        section = sections[index]
         lang = state.get("language", "zh")
 
-        logger.info(f"Reviewing section: {section.title}")
+        if index >= len(sections):
+            logger.error("review called with out-of-bounds index", index=index, total=len(sections))
+            return {"status": "failed", "error_message": "Review index out of bounds"}
+
+        section = sections[index]
+
+        logger.info("reviewing section", title=section.title)
 
         try:
-            result = await self.chain.ainvoke(
+            result = await invoke_with_retry(
+                self.chain,
                 {
                     "topic": state["topic"],
                     "section_title": section.title,
                     "content": section.content,
-                }
+                },
             )
             review = ReviewResult(
                 approved=result.get("approved", False),
@@ -50,7 +57,7 @@ class ReviewerNode:
                 summary=result.get("summary", ""),
             )
         except Exception as e:
-            logger.error(f"Review failed: {e}")
+            logger.error("review failed after retries", error=str(e))
             review = ReviewResult(
                 approved=False,
                 score=5,
@@ -61,6 +68,12 @@ class ReviewerNode:
                 ],
                 summary=t(lang, "review_error_summary"),
             )
+
+        citation_issues = self._verify_citations(section.content, state.get("papers", []))
+        if citation_issues:
+            review.issues.extend(citation_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
 
         record = {
             "section": section.title,
@@ -73,13 +86,33 @@ class ReviewerNode:
             return await self._handle_approved(state, section, review, record)
         return await self._handle_rejected(state, section, review, record)
 
-    async def _handle_approved(self, state, section, review, record):
+    def _verify_citations(self, content: str, papers: list[PaperMetadata]) -> list[ReviewIssue]:
+        cited_numbers = {int(m) for m in CITATION_PATTERN.findall(content)}
+        if not cited_numbers:
+            return []
+
+        total_papers = len(papers)
+        issues: list[ReviewIssue] = []
+        for num in sorted(cited_numbers):
+            if num < 1 or num > total_papers:
+                issues.append(
+                    ReviewIssue(
+                        type="missing_citation",
+                        description=f"Citation [{num}] does not correspond to any paper in the reference list (total: {total_papers})",
+                        suggestion=f"Remove [{num}] or replace with a valid citation [1]-[{total_papers}]",
+                    )
+                )
+        return issues
+
+    async def _handle_approved(
+        self, state: AgentState, section: Any, review: ReviewResult, record: dict[str, Any]
+    ) -> dict[str, Any]:
         sections = state["sections"]
         index = state["current_section_index"]
         updated = sections.copy()
         updated[index] = section.model_copy(update={"status": "approved"})
 
-        completed = state.get("section_completed", [])
+        completed = state.get("sections_completed", [])
         completed.append(section.title)
 
         if index + 1 >= len(sections):
@@ -100,7 +133,9 @@ class ReviewerNode:
             "status": "writing",
         }
 
-    async def _handle_rejected(self, state, section, review, record):
+    async def _handle_rejected(
+        self, state: AgentState, section: Any, review: ReviewResult, record: dict[str, Any]
+    ) -> dict[str, Any]:
         sections = state["sections"]
         index = state["current_section_index"]
         revision_count = state.get("revision_count", 0)
@@ -108,7 +143,7 @@ class ReviewerNode:
         lang = state.get("language", "zh")
 
         if revision_count >= max_revisions:
-            logger.warning("Max revisions reached, forcing approval")
+            logger.warning("max revisions reached, forcing approval")
             updated = sections.copy()
             updated[index] = section.model_copy(update={"status": "approved"})
             return {"sections": updated, "review_history": [record], "status": "completed"}

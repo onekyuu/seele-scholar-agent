@@ -23,6 +23,7 @@ class ProposedTopic(BaseModel):
     trend_analysis: str
     difficulty_level: Literal["easy", "medium", "hard"]
 
+
 class DocumentChunk(BaseModel):
     chunk_id: str
     content: str
@@ -99,8 +100,6 @@ class AgentState(TypedDict):
         "completed",
         "failed",
     ]
-    pending_node: str | None
     error_message: str | None
     max_revisions: int
     revision_count: int
-    prompt: str | None

@@ -8,6 +8,7 @@ from langchain_core.language_models import BaseLanguageModel
 from seele_scholar_agent.state import AgentState, PaperMetadata
 
 from ..logging import get_logger
+from . import API_MAX_RETRIES, API_RETRY_BASE_DELAY, ARXIV_RATE_LIMIT_DELAY, HTTP_TIMEOUT
 from .prompts import TOPIC_TRANSLATION_SYSTEM_PROMPT, TOPIC_TRANSLATION_USER_PROMPT
 
 logger = get_logger(__name__)
@@ -22,35 +23,42 @@ class ArxivRetriever:
     async def search(self, query: str) -> list[PaperMetadata]:
         search_url = f"{self.BASE_URL}?search_query={query}&sortBy=relevance&sortOrder=descending&start=0&max_results={self.top_k}"
 
-        for attempt in range(3):
+        for attempt in range(API_MAX_RETRIES):
             try:
-                async with AsyncClient(timeout=30.0) as client:
+                async with AsyncClient(timeout=HTTP_TIMEOUT) as client:
                     response = await client.get(search_url)
 
                     if response.status_code == 429:
                         retry_after = int(response.headers.get("retry-after", 5))
                         logger.warning(
-                            f"ArXiv rate limited, waiting {retry_after}s before retry..."
+                            "ArXiv rate limited, retrying",
+                            retry_after=retry_after,
+                            attempt=attempt + 1,
                         )
                         await asyncio.sleep(retry_after)
                         continue
 
                     if response.status_code != 200:
-                        logger.error(f"ArXiv API error: {response.status_code}")
+                        logger.error("ArXiv API error", status_code=response.status_code)
                         return []
 
                     return self._parse_response(response.text)
 
             except HTTPStatusError as e:
-                if attempt < 2:
-                    wait_time = 2**attempt * 3
-                    logger.warning(f"ArXiv request failed, retrying in {wait_time}s... ({e}")
+                if attempt < API_MAX_RETRIES - 1:
+                    wait_time = API_RETRY_BASE_DELAY * (2**attempt)
+                    logger.warning(
+                        "ArXiv request failed, retrying",
+                        wait_time=wait_time,
+                        attempt=attempt + 1,
+                        error=str(e),
+                    )
                     await asyncio.sleep(wait_time)
                     continue
-                logger.error(f"ArXiv search failed after 3 attempts: {e}")
+                logger.error("ArXiv search failed after retries", error=str(e))
                 return []
             except Exception as e:
-                logger.error(f"ArXiv search failed: {e}")
+                logger.error("ArXiv search failed", error=str(e))
                 return []
 
         return []
@@ -83,7 +91,7 @@ class ArxivRetriever:
                     )
                 )
             except Exception as e:
-                logger.warning(f"Failed to parse ArXiv entry: {e}")
+                logger.warning("failed to parse ArXiv entry", error=str(e))
                 continue
 
         return papers
@@ -113,7 +121,7 @@ class OpenAlexRetriever:
                 words[idx] = word
         return " ".join(words).strip()
 
-    def _calculate_relevance(self, paper: dict) -> float:
+    def _calculate_relevance(self, paper: dict[str, Any]) -> float:
         citation_count = paper.get("cited_by_count", 0)
         year = paper.get("publication_year", 2020)
         citation_score = min(citation_count / 1000, 1.0)
@@ -128,47 +136,70 @@ class OpenAlexRetriever:
             "select": "id,doi,title,publication_year,authorships,abstract_inverted_index,cited_by_count",
         }
 
-        try:
-            async with AsyncClient(timeout=30.0) as client:
-                logger.info("OpenAlex searching...")
-                response = await client.get(self.BASE_URL, params=params)
+        for attempt in range(API_MAX_RETRIES):
+            try:
+                async with AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                    logger.info("OpenAlex searching", attempt=attempt + 1)
+                    response = await client.get(self.BASE_URL, params=params)
 
-                if response.status_code != 200:
-                    logger.error(f"OpenAlex API error: {response.status_code}")
-                    return []
-
-                data = response.json()
-                papers = []
-
-                for item in data.get("results", []):
-                    authorships = item.get("authorships", [])
-                    first_author = "Unknown"
-                    if authorships:
-                        first_author_dict = authorships[0].get("author", {})
-                        if first_author_dict:
-                            first_author = first_author_dict.get("display_name", "Unknown")
-
-                    abstract = self._reconstruct_abstract(item.get("abstract_inverted_index"))
-                    relevance = self._calculate_relevance(item)
-
-                    papers.append(
-                        PaperMetadata(
-                            paper_id=item.get("id", ""),
-                            title=item.get("title", ""),
-                            authors=[first_author] if first_author != "Unknown" else [],
-                            abstract=abstract,
-                            url=item.get("doi", ""),
-                            pdf_url="",
-                            source="openalex",
-                            relevance_score=relevance,
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("retry-after", 5))
+                        logger.warning(
+                            "OpenAlex rate limited, retrying",
+                            retry_after=retry_after,
+                            attempt=attempt + 1,
                         )
+                        await asyncio.sleep(retry_after)
+                        continue
+
+                    if response.status_code != 200:
+                        logger.error("OpenAlex API error", status_code=response.status_code)
+                        return []
+
+                    data = response.json()
+                    papers = []
+
+                    for item in data.get("results", []):
+                        authorships = item.get("authorships", [])
+                        first_author = "Unknown"
+                        if authorships:
+                            first_author_dict = authorships[0].get("author", {})
+                            if first_author_dict:
+                                first_author = first_author_dict.get("display_name", "Unknown")
+
+                        abstract = self._reconstruct_abstract(item.get("abstract_inverted_index"))
+                        relevance = self._calculate_relevance(item)
+
+                        papers.append(
+                            PaperMetadata(
+                                paper_id=item.get("id", ""),
+                                title=item.get("title", ""),
+                                authors=[first_author] if first_author != "Unknown" else [],
+                                abstract=abstract,
+                                url=item.get("doi", ""),
+                                pdf_url="",
+                                source="openalex",
+                                relevance_score=relevance,
+                            )
+                        )
+
+                    return papers
+
+            except Exception as e:
+                if attempt < API_MAX_RETRIES - 1:
+                    wait_time = API_RETRY_BASE_DELAY * (2**attempt)
+                    logger.warning(
+                        "OpenAlex request failed, retrying",
+                        wait_time=wait_time,
+                        attempt=attempt + 1,
+                        error=str(e),
                     )
+                    await asyncio.sleep(wait_time)
+                    continue
+                logger.error("OpenAlex search failed after retries", error=str(e))
+                return []
 
-                return papers
-
-        except Exception as e:
-            logger.error(f"OpenAlex search failed: {e}")
-            return []
+        return []
 
 
 class SemanticScholarRetriever:
@@ -177,9 +208,9 @@ class SemanticScholarRetriever:
     def __init__(self, api_key: str | None = None, top_k: int = 10):
         self.api_key = api_key
         self.top_k = top_k
-        self.headers = {"x-api-key": api_key} if api_key else {}
+        self.headers: dict[str, str] = {"x-api-key": api_key} if api_key else {}
 
-    async def search(self, query: str, fields: list[str] | None = None):
+    async def search(self, query: str, fields: list[str] | None = None) -> list[PaperMetadata]:
         if fields is None:
             fields = [
                 "paperId",
@@ -195,34 +226,61 @@ class SemanticScholarRetriever:
         url = f"{self.BASE_URL}/paper/search"
         params = {"query": query, "limit": self.top_k, "fields": ",".join(fields)}
 
-        try:
-            async with AsyncClient() as client:
-                response = await client.get(url, params=params, headers=self.headers, timeout=30.0)
-                if response.status_code != 200:
-                    return []
-                data = response.json()
+        for attempt in range(API_MAX_RETRIES):
+            try:
+                async with AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                    response = await client.get(url, params=params, headers=self.headers)
 
-            papers = []
-            for r in data.get("data", [])[: self.top_k]:
-                relevance = self._calculate_relevance(r)
-                papers.append(
-                    PaperMetadata(
-                        paper_id=r["paperId"],
-                        title=r.get("title", ""),
-                        authors=[a.get("name", "") for a in r.get("authors", [])],
-                        abstract=r.get("abstract", ""),
-                        url=r.get("url", ""),
-                        pdf_url=r.get("pdfUrl", ""),
-                        source="semantic_scholar",
-                        relevance_score=relevance,
+                    if response.status_code == 429:
+                        retry_after = int(response.headers.get("retry-after", 5))
+                        logger.warning(
+                            "Semantic Scholar rate limited, retrying",
+                            retry_after=retry_after,
+                            attempt=attempt + 1,
+                        )
+                        await asyncio.sleep(retry_after)
+                        continue
+
+                    if response.status_code != 200:
+                        logger.error("Semantic Scholar API error", status_code=response.status_code)
+                        return []
+
+                    data = response.json()
+
+                papers = []
+                for r in data.get("data", [])[: self.top_k]:
+                    relevance = self._calculate_relevance(r)
+                    papers.append(
+                        PaperMetadata(
+                            paper_id=r["paperId"],
+                            title=r.get("title", ""),
+                            authors=[a.get("name", "") for a in r.get("authors", [])],
+                            abstract=r.get("abstract", ""),
+                            url=r.get("url", ""),
+                            pdf_url=r.get("pdfUrl", ""),
+                            source="semantic_scholar",
+                            relevance_score=relevance,
+                        )
                     )
-                )
-            return papers
-        except Exception as e:
-            logger.error("Semantic Scholar search failed", error=str(e))
-            return []
+                return papers
 
-    def _calculate_relevance(self, paper: dict) -> float:
+            except Exception as e:
+                if attempt < API_MAX_RETRIES - 1:
+                    wait_time = API_RETRY_BASE_DELAY * (2**attempt)
+                    logger.warning(
+                        "Semantic Scholar request failed, retrying",
+                        wait_time=wait_time,
+                        attempt=attempt + 1,
+                        error=str(e),
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                logger.error("Semantic Scholar search failed after retries", error=str(e))
+                return []
+
+        return []
+
+    def _calculate_relevance(self, paper: dict[str, Any]) -> float:
         citation_count = paper.get("citationCount", 0)
         year = paper.get("year", 2020)
         citation_score = min(citation_count / 1000, 1.0)
@@ -234,8 +292,8 @@ class ResearcherNode:
     def __init__(
         self,
         llm: BaseLanguageModel | None = None,
-        qdrant_client=None,
-        embedding_model=None,
+        qdrant_client: Any = None,
+        embedding_model: Any = None,
         semantic_scholar_key: str | None = None,
         openalex_email: str | None = None,
     ):
@@ -249,16 +307,12 @@ class ResearcherNode:
     def _needs_translation(self, topic: str) -> bool:
         for ch in topic:
             cp = ord(ch)
-            # CJK Unified Ideographs (Chinese)
             if 0x4E00 <= cp <= 0x9FFF:
                 return True
-            # Hiragana / Katakana (Japanese)
             if 0x3040 <= cp <= 0x30FF:
                 return True
-            # Hangul (Korean)
             if 0xAC00 <= cp <= 0xD7A3:
                 return True
-            # Full-width / other non-ASCII that aren't Latin-extended
             if cp > 0x024F and unicodedata.category(ch) not in ("Po", "Pd", "Ps", "Pe", "Zs"):
                 return True
         return False
@@ -318,7 +372,7 @@ class ResearcherNode:
             )
 
             logger.info("searching ArXiv (with rate-limit delay)", query=query)
-            await asyncio.sleep(3)
+            await asyncio.sleep(ARXIV_RATE_LIMIT_DELAY)
             arxiv_papers = await self.arxiv.search(query)
 
             for paper in [*openalex_papers, *ss_papers, *arxiv_papers]:

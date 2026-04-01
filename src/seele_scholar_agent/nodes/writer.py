@@ -7,6 +7,7 @@ from ..agent_config import PromptsConfig, RAGRetrieverFunc
 from ..i18n import t
 from ..logging import get_logger
 from ..state import AgentState
+from . import invoke_with_retry
 
 logger = get_logger(__name__)
 
@@ -39,7 +40,7 @@ class WriterNode:
         if section.status == "approved":
             return await self._move_to_next(state)
 
-        logger.info(f"Writing section: {section.title}", language=lang)
+        logger.info("writing section", title=section.title, language=lang)
 
         if self.rag_retriever:
             search_query = f"{state['topic']} {section.title} {section.description}"
@@ -52,7 +53,8 @@ class WriterNode:
         review_comments = self._build_review_comments(section)
 
         try:
-            result = await self.chain.ainvoke(
+            result = await invoke_with_retry(
+                self.chain,
                 {
                     "topic": state["topic"],
                     "language": t(lang, "language_name"),
@@ -61,7 +63,7 @@ class WriterNode:
                     "outline_json": outline_json,
                     "rag_context": rag_context,
                     "review_comments": review_comments,
-                }
+                },
             )
 
             content = result.content if hasattr(result, "content") else str(result)
@@ -69,8 +71,14 @@ class WriterNode:
                 content = "\n".join(str(c) for c in content)
             content = self._clean_content(content)
         except Exception as e:
-            logger.error(f"Writing failed: {e}")
-            content = f"**[Error: {str(e)}]**"
+            logger.error("writing failed after retries", error=str(e))
+            updated_sections = sections.copy()
+            updated_sections[current_index] = section.model_copy(update={"status": "pending"})
+            return {
+                "sections": updated_sections,
+                "status": "failed",
+                "error_message": f"Writing section '{section.title}' failed: {e}",
+            }
 
         updated_sections = sections.copy()
         updated_sections[current_index] = section.model_copy(
@@ -83,7 +91,7 @@ class WriterNode:
 
         return {"sections": updated_sections, "status": "reviewing"}
 
-    def _build_outline_json(self, outline) -> str:
+    def _build_outline_json(self, outline: Any) -> str:
         if not outline:
             return ""
         lines = [f"Title: {outline.title}", ""]
@@ -91,12 +99,12 @@ class WriterNode:
             lines.append(f"- {s.title}: {s.description}")
         return "\n".join(lines)
 
-    def _build_rag_context(self, rag_context) -> str:
+    def _build_rag_context(self, rag_context: Any) -> str:
         if not rag_context:
             return "无"
         return "\n\n".join([c.content for c in rag_context[:5]])
 
-    def _build_review_comments(self, section) -> str:
+    def _build_review_comments(self, section: Any) -> str:
         if not section.review_comments:
             return "无"
         return "\n".join([f"- {c}" for c in section.review_comments])
@@ -107,7 +115,7 @@ class WriterNode:
         completed = state.get("sections_completed", [])
         completed.append(sections[index].title)
 
-        if index + 1 > len(sections):
+        if index + 1 >= len(sections):
             return {"sections_completed": completed, "status": "completed"}
 
         return {

@@ -85,7 +85,6 @@ def build_initial_state(topic: str, lang: str, thread_id: str) -> AgentState:
         "current_review": None,
         "rag_context": [],
         "status": "idle",
-        "pending_node": None,
         "error_message": None,
         "max_revisions": settings.MAX_REVISIONS,
         "revision_count": 0,

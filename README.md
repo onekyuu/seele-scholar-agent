@@ -26,42 +26,31 @@ pip install -e .
 
 ## 配置
 
-复制环境变量文件并配置你的 API 密钥：
+### Agent 包内部配置
+
+`seele-scholar-agent` 只管理自身运行所需的极少数配置，通过 `src/seele_scholar_agent/.env` 加载：
 
 ```bash
 cp src/seele_scholar_agent/.env.example src/seele_scholar_agent/.env
 ```
 
-### 必需配置
-
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `OPENAI_API_KEY` | LLM 提供商的 API 密钥 | 必填 |
-| `OPENAI_MODEL` | 模型名称 | `gpt-4o` |
-| `OPENAI_BASE_URL` | API 端点 | `https://api.openai.com/v1` |
-
-### 可选配置
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `OPENAI_TEMPERATURE` | LLM 温度参数 | `0.7` |
-| `OPENAI_MAX_TOKENS` | 最大响应 token 数 | `4096` |
-| `SEMANTIC_SCHOLAR_API_KEY` | Semantic Scholar API 密钥（可选） | 空 |
-| `QDRANT_URL` | Qdrant 向量数据库地址 | `http://localhost:6333` |
-| `QDRANT_API_KEY` | Qdrant API 密钥 | 空 |
-| `QDRANT_COLLECTION` | Qdrant 集合名称 | `user_documents` |
-| `EMBEDDING_MODEL` | 嵌入模型 | `text-embedding-3-small` |
+| `SEMANTIC_SCHOLAR_API_KEY` | Semantic Scholar API 密钥（可选，提升频率限制） | 空 |
 | `MAX_REVISIONS` | 最大修订轮次 | `3` |
-| `DEFAULT_TOP_K` | 默认搜索结果数量 | `10` |
 
-### 模型提供商配置示例
+### 调用方配置（由你的项目管理）
 
-**OpenAI（默认）：**
+LLM、向量数据库等配置由**调用方**自行管理，在初始化时注入到 agent：
+
 ```env
-OPENAI_API_KEY = "sk-..."
-OPENAI_MODEL = "gpt-4o"
-OPENAI_BASE_URL = "https://api.openai.com/v1"
+# 你的项目 .env（示例）
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o
+OPENAI_BASE_URL=https://api.openai.com/v1
 ```
+
+支持任何 OpenAI 兼容 API，通过 `ChatOpenAI` 构造参数传入：
 
 **DeepSeek：**
 ```env
@@ -93,12 +82,12 @@ from seele_scholar_agent.state import AgentState
 
 
 async def main():
-    # 创建 LLM
+    # 创建 LLM（由调用方配置，支持任何 OpenAI 兼容 API）
     model = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
-        api_key=settings.OPENAI_API_KEY or None,
-        base_url=settings.OPENAI_BASE_URL,
-        temperature=settings.OPENAI_TEMPERATURE,
+        model="gpt-4o",            # 或 "deepseek-chat"、"llama-3.1-70b-versatile" 等
+        api_key="sk-...",          # 你的 API Key
+        base_url="https://api.openai.com/v1",  # 可替换为其他端点
+        temperature=0.7,
     )
 
     # 创建图
@@ -121,7 +110,6 @@ async def main():
         "current_review": None,
         "rag_context": [],
         "status": "idle",
-        "pending_node": None,
         "error_message": None,
         "max_revisions": settings.MAX_REVISIONS,
         "revision_count": 0,
@@ -150,13 +138,13 @@ if __name__ == "__main__":
 from qdrant_client import QdrantClient
 from langchain_openai import OpenAIEmbeddings
 
-# 初始化 Qdrant 客户端
-qdrant = QdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY)
+# 初始化 Qdrant 客户端（由调用方配置）
+qdrant = QdrantClient(url="http://localhost:6333", api_key=None)
 
-# 初始化嵌入模型
+# 初始化嵌入模型（由调用方配置）
 embeddings = OpenAIEmbeddings(
-    model=settings.EMBEDDING_MODEL,
-    api_key=settings.OPENAI_API_KEY or None,
+    model="text-embedding-3-small",
+    api_key="sk-...",
 )
 
 # 创建带 RAG 支持的图
@@ -204,7 +192,6 @@ seele_scholar_agent/
 | `current_review` | `ReviewResult \| None` | 当前审核结果 |
 | `rag_context` | `list[DocumentChunk]` | RAG 检索到的上下文 |
 | `status` | `Literal[...]` | 当前状态 |
-| `pending_node` | `str \| None` | 待处理的节点名称 |
 | `error_message` | `str \| None` | 错误信息 |
 | `max_revisions` | `int` | 最大修订次数 |
 | `revision_count` | `int` | 当前修订计数 |
