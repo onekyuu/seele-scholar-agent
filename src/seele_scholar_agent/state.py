@@ -36,6 +36,7 @@ class SectionOutline(BaseModel):
     description: str = ""
     order: int
     key_points: list[str] = Field(default_factory=list)
+    suggested_figures: list[str] = Field(default_factory=list)
 
 
 class OutlineStructure(BaseModel):

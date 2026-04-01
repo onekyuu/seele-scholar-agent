@@ -69,6 +69,7 @@ class PlannerNode:
                     description=s.get("description", ""),
                     order=s.get("order", i),
                     key_points=s.get("key_points", []),
+                    suggested_figures=s.get("suggested_figures", []),
                 )
                 for i, s in enumerate(result.get("sections", []), 1)
             ],
@@ -135,6 +136,7 @@ class PlannerNode:
                     description=s.get("description", ""),
                     order=s.get("order", i),
                     key_points=s.get("key_points", []),
+                    suggested_figures=s.get("suggested_figures", []),
                 )
                 for i, s in enumerate(result.get("sections", []), 1)
             ],

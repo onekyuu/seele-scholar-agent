@@ -63,6 +63,7 @@ class WriterNode:
                     "language": t(lang, "language_name"),
                     "section_title": section.title,
                     "section_description": section.description,
+                    "suggested_figures": self._build_suggested_figures(section, state),
                     "outline_json": outline_json,
                     "previous_sections": previous_sections,
                     "numbered_papers": numbered_papers,
@@ -132,6 +133,7 @@ class WriterNode:
             "language": t(lang, "language_name"),
             "section_title": section.title,
             "section_description": section.description,
+            "suggested_figures": self._build_suggested_figures(section, state),
             "outline_json": self._build_outline_json(state.get("outline")),
             "previous_sections": self._build_previous_sections_context(sections, current_index),
             "numbered_papers": self._build_numbered_papers(state.get("papers", [])),
@@ -160,6 +162,16 @@ class WriterNode:
             result={"sections": updated_sections, "status": "reviewing"},
         )
 
+    def _build_suggested_figures(self, section: SectionDraft, state: AgentState) -> str:
+        outline = state.get("outline")
+        if not outline:
+            return "无"
+        for sec_outline in outline.sections:
+            if sec_outline.title == section.title and sec_outline.suggested_figures:
+                lines = [f"- {fig}" for fig in sec_outline.suggested_figures]
+                return "\n".join(lines)
+        return "无"
+
     def _build_outline_json(self, outline: Any) -> str:
         if not outline:
             return ""
@@ -171,7 +183,10 @@ class WriterNode:
     def _build_rag_context(self, rag_context: Any) -> str:
         if not rag_context:
             return "无"
-        return "\n\n".join([c.content for c in rag_context[:5]])
+        parts = []
+        for c in rag_context[:5]:
+            parts.append(f"[chunk_id:{c.chunk_id}]\n{c.content}")
+        return "\n\n".join(parts)
 
     def _build_review_comments(self, section: Any) -> str:
         if not section.review_comments:
@@ -236,6 +251,4 @@ class WriterNode:
             if line.strip():
                 clean.append(line)
 
-        result = "\n".join(clean).strip()
-        result = result.replace("]", "")
-        return result
+        return "\n".join(clean).strip()
