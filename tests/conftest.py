@@ -9,6 +9,12 @@ from langchain_openai import ChatOpenAI
 
 from seele_scholar_agent.agent_config import PromptsConfig
 from seele_scholar_agent.nodes.prompts import (
+    CITATION_ALIGNMENT_SYSTEM_PROMPT,
+    CITATION_ALIGNMENT_USER_PROMPT,
+    CONSISTENCY_CHECK_SYSTEM_PROMPT,
+    CONSISTENCY_CHECK_USER_PROMPT,
+    FINALIZER_SYSTEM_PROMPT,
+    FINALIZER_USER_PROMPT,
     PLANNER_SYSTEM_PROMPT,
     PLANNER_USER_PROMPT,
     REVIEWER_SYSTEM_PROMPT,
@@ -39,6 +45,12 @@ def mock_prompts() -> PromptsConfig:
         reviewer_user_prompt=REVIEWER_USER_PROMPT,
         topic_proposer_system_prompt=TOPIC_PROPOSER_SYSTEM_PROMPT,
         topic_proposer_user_prompt=TOPIC_PROPOSER_USER_PROMPT,
+        finalizer_system_prompt=FINALIZER_SYSTEM_PROMPT,
+        finalizer_user_prompt=FINALIZER_USER_PROMPT,
+        consistency_check_system_prompt=CONSISTENCY_CHECK_SYSTEM_PROMPT,
+        consistency_check_user_prompt=CONSISTENCY_CHECK_USER_PROMPT,
+        citation_alignment_system_prompt=CITATION_ALIGNMENT_SYSTEM_PROMPT,
+        citation_alignment_user_prompt=CITATION_ALIGNMENT_USER_PROMPT,
     )
 
 
@@ -105,6 +117,9 @@ def base_state() -> AgentState:
         error_message=None,
         max_revisions=3,
         revision_count=0,
+        references=[],
+        consistency_issues=[],
+        consistency_checked=False,
     )
 
 

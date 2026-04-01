@@ -17,7 +17,8 @@ LLM_RETRY_BASE_DELAY = 1.0
 API_MAX_RETRIES = 3
 API_RETRY_BASE_DELAY = 3.0
 
-# Matches citation markers: [1], [2], [12], etc.
+PREVIOUS_SECTION_MAX_CHARS = 500
+
 CITATION_PATTERN = re.compile(r"\[(\d+)\]")
 
 

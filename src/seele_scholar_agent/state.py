@@ -51,13 +51,20 @@ class SectionDraft(BaseModel):
     description: str = ""
     content: str = ""
     order_index: int
-    status: Literal["pending", "writing", "review", "approved"] = "pending"
+    status: Literal["pending", "writing", "review", "approved", "auto_generated"] = "pending"
     revision_count: int = 0
     review_comments: list[str] = Field(default_factory=list)
 
 
 class ReviewIssue(BaseModel):
-    type: Literal["factual_error", "missing_citation", "weak_argument", "format_issue", "other"]
+    type: Literal[
+        "factual_error",
+        "missing_citation",
+        "weak_argument",
+        "format_issue",
+        "citation_mismatch",
+        "other",
+    ]
     description: str
     suggestion: str
     location: str | None = None
@@ -68,6 +75,24 @@ class ReviewResult(BaseModel):
     score: int = Field(ge=1, le=10)
     issues: list[ReviewIssue] = []
     summary: str
+
+
+class ReferenceEntry(BaseModel):
+    number: int
+    paper_id: str
+    title: str
+    authors: list[str]
+    year: int | None = None
+    venue: str | None = None
+    url: str | None = None
+    formatted: str
+
+
+class ConsistencyIssue(BaseModel):
+    issue_type: Literal["terminology", "citation", "logic", "other"]
+    description: str
+    sections_involved: list[str]
+    suggestion: str
 
 
 class AgentState(TypedDict):
@@ -96,6 +121,8 @@ class AgentState(TypedDict):
         "planning",
         "writing",
         "reviewing",
+        "finalizing",
+        "checking_consistency",
         "waiting_human",
         "completed",
         "failed",
@@ -103,3 +130,7 @@ class AgentState(TypedDict):
     error_message: str | None
     max_revisions: int
     revision_count: int
+
+    references: list[ReferenceEntry]
+    consistency_issues: list[ConsistencyIssue]
+    consistency_checked: bool

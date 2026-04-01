@@ -1,4 +1,4 @@
-"""Unit tests for ReviewerNode — RV-01 through RV-09."""
+"""Unit tests for ReviewerNode — RV-01 through RV-13."""
 
 from datetime import datetime
 from typing import cast
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from seele_scholar_agent.nodes.reviewer import ReviewerNode
-from seele_scholar_agent.state import AgentState, SectionDraft
+from seele_scholar_agent.state import AgentState, PaperMetadata, SectionDraft
 
 
 def _make_state_with_written_section(
@@ -296,3 +296,190 @@ async def test_reviewer_history_record_structure(mock_llm, mock_prompts, base_st
     assert record["score"] == 8
     assert record["approved"] is True
     datetime.fromisoformat(record["timestamp"])
+
+
+# ---------------------------------------------------------------------------
+# RV-10: Valid citations + LLM returns issues → citation_mismatch issues added
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reviewer_citation_alignment_issues_added(mock_llm, mock_prompts, base_state):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="Attention Is All You Need",
+            authors=["Vaswani"],
+            abstract="Transformer architecture.",
+            source="arxiv",
+        ),
+    ]
+    sections = [
+        _written_section("Introduction", content="The model in [1] is widely used.", index=0)
+    ]
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, sections, index=0),
+            "papers": papers,
+        },
+    )
+
+    main_review = {"approved": True, "score": 8, "issues": [], "summary": "Good."}
+    citation_result = {
+        "issues": [
+            {
+                "description": "Citation [1] context mismatch.",
+                "suggestion": "Verify claim.",
+                "citation_number": 1,
+            }
+        ]
+    }
+
+    call_count = 0
+
+    async def mock_invoke(chain, input_data, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return main_review
+        return citation_result
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        side_effect=mock_invoke,
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert call_count == 2
+    current_review = result.get("current_review") or {}
+    all_issues = current_review.get("issues", [])
+    citation_issues = [i for i in all_issues if i.get("type") == "citation_mismatch"]
+    assert len(citation_issues) >= 1
+
+
+# ---------------------------------------------------------------------------
+# RV-11: Citation alignment LLM returns empty issues → review result unaffected
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reviewer_citation_alignment_empty_issues_no_effect(
+    mock_llm, mock_prompts, base_state
+):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="BERT",
+            authors=["Devlin"],
+            abstract="Bidirectional encoder.",
+            source="semantic_scholar",
+        ),
+    ]
+    sections = [_written_section("Methods", content="We follow [1].", index=0)]
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, sections, index=0),
+            "papers": papers,
+        },
+    )
+
+    call_count = 0
+
+    async def mock_invoke(chain, input_data, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {"approved": True, "score": 9, "issues": [], "summary": "Fine."}
+        return {"issues": []}
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        side_effect=mock_invoke,
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["sections"][0].status == "approved"
+    assert result["status"] in ("completed", "writing")
+
+
+# ---------------------------------------------------------------------------
+# RV-12: papers=[] → citation alignment check not triggered
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reviewer_no_citation_alignment_when_no_papers(mock_llm, mock_prompts, base_state):
+    sections = [_written_section("Introduction", content="Some content.", index=0)]
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, sections, index=0),
+            "papers": [],
+        },
+    )
+
+    invoke_count = 0
+
+    async def mock_invoke(chain, input_data, **kwargs):
+        nonlocal invoke_count
+        invoke_count += 1
+        return {"approved": True, "score": 8, "issues": [], "summary": "OK."}
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        side_effect=mock_invoke,
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        await node.review(state)
+
+    assert invoke_count == 1
+
+
+# ---------------------------------------------------------------------------
+# RV-13: Citation alignment LLM fails → main review flow unaffected
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reviewer_citation_alignment_failure_does_not_block_review(
+    mock_llm, mock_prompts, base_state
+):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="GPT-3",
+            authors=["Brown"],
+            abstract="Few-shot learner.",
+            source="openalex",
+        ),
+    ]
+    sections = [_written_section("Discussion", content="See [1] for details.", index=0)]
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, sections, index=0),
+            "papers": papers,
+        },
+    )
+
+    call_count = 0
+
+    async def mock_invoke(chain, input_data, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {"approved": True, "score": 8, "issues": [], "summary": "Good."}
+        raise Exception("citation LLM failed")
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        side_effect=mock_invoke,
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] in ("completed", "writing")

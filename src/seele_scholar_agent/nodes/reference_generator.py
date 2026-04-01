@@ -1,0 +1,83 @@
+import re
+from typing import Any
+
+from ..logging import get_logger
+from ..state import AgentState, PaperMetadata, ReferenceEntry
+from . import CITATION_PATTERN
+
+logger = get_logger(__name__)
+
+_AUTHOR_YEAR_RE = re.compile(r"(\d{4})")
+
+
+def _extract_year(paper: PaperMetadata) -> int | None:
+    for field in (paper.url or "", paper.abstract or ""):
+        m = _AUTHOR_YEAR_RE.search(field)
+        if m:
+            year = int(m.group(1))
+            if 1900 <= year <= 2100:
+                return year
+    return None
+
+
+def _format_authors(authors: list[str], max_authors: int = 3) -> str:
+    if not authors:
+        return "Unknown"
+    if len(authors) <= max_authors:
+        return ", ".join(authors)
+    return ", ".join(authors[:max_authors]) + " et al."
+
+
+def _format_reference(entry: ReferenceEntry) -> str:
+    authors_str = _format_authors(entry.authors)
+    year_str = f" ({entry.year})" if entry.year else ""
+    venue_str = f". {entry.venue}" if entry.venue else ""
+    url_str = f". {entry.url}" if entry.url else ""
+    return f"[{entry.number}] {authors_str}{year_str}. {entry.title}{venue_str}{url_str}"
+
+
+def _collect_cited_numbers(sections_content: list[str]) -> set[int]:
+    cited: set[int] = set()
+    for content in sections_content:
+        for m in CITATION_PATTERN.finditer(content):
+            cited.add(int(m.group(1)))
+    return cited
+
+
+class ReferenceGeneratorNode:
+    async def generate(self, state: AgentState) -> dict[str, Any]:
+        papers = state.get("papers", [])
+        sections = state.get("sections", [])
+
+        if not papers:
+            logger.warning("no papers available for reference generation")
+            return {"references": [], "status": "completed"}
+
+        cited_numbers = _collect_cited_numbers([s.content for s in sections if s.content])
+
+        if not cited_numbers:
+            logger.info("no citations found in sections, generating full reference list")
+            cited_numbers = set(range(1, len(papers) + 1))
+
+        entries: list[ReferenceEntry] = []
+        for num in sorted(cited_numbers):
+            idx = num - 1
+            if idx < 0 or idx >= len(papers):
+                logger.warning("citation number out of range", number=num, total=len(papers))
+                continue
+            paper = papers[idx]
+            year = _extract_year(paper)
+            entry = ReferenceEntry(
+                number=num,
+                paper_id=paper.paper_id,
+                title=paper.title,
+                authors=paper.authors,
+                year=year,
+                url=paper.url,
+                formatted="",
+            )
+            entry = entry.model_copy(update={"formatted": _format_reference(entry)})
+            entries.append(entry)
+
+        logger.info("references generated", count=len(entries))
+        return {"references": entries, "status": "completed"}

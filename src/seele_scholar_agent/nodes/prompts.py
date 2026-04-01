@@ -48,6 +48,12 @@ WRITER_USER_PROMPT = """论文主题：{topic}
 论文大纲：
 {outline_json}
 
+已完成章节摘要（供上下文参考，避免重复）：
+{previous_sections}
+
+可引用论文列表（引用时只能使用以下编号，格式为 [N]）：
+{numbered_papers}
+
 相关文献上下文：
 {rag_context}
 
@@ -112,3 +118,70 @@ TOPIC_PROPOSER_USER_PROMPT = """宽泛研究方向：{topic}
 {papers_summary}
 
 请结合上述最新文献的研究趋势，为我推荐 3 个具体的论文选题。目标语言：{language}。"""
+
+FINALIZER_SYSTEM_PROMPT = """你是一位专业的学术论文撰写者。请根据已完成的论文章节内容，撰写{section_type}。
+
+要求：
+1. 内容应忠实反映各章节的实际内容，不得引入新信息
+2. 学术风格，简洁精准
+3. 使用{language}撰写
+4. 直接输出正文，不要输出标题"""
+
+FINALIZER_USER_PROMPT = """论文主题：{topic}
+目标语言：{language}
+需要撰写：{section_type}
+
+已完成的章节内容：
+{completed_sections}
+
+请撰写{section_type}，使用{language}，不要输出标题，只输出正文。"""
+
+CONSISTENCY_CHECK_SYSTEM_PROMPT = """你是一位严谨的学术论文审稿人，专门负责检查论文各章节之间的一致性。
+输出有效的 JSON 格式。"""
+
+CONSISTENCY_CHECK_USER_PROMPT = """请检查以下论文章节之间的一致性：
+
+论文主题：{topic}
+
+各章节内容摘要：
+{sections_summary}
+
+请检查以下维度并输出 JSON：
+{{
+    "issues": [
+        {{
+            "issue_type": "terminology|citation|logic|other",
+            "description": "问题描述",
+            "sections_involved": ["章节A", "章节B"],
+            "suggestion": "修改建议"
+        }}
+    ],
+    "summary": "整体一致性评估"
+}}
+
+如无问题，issues 返回空数组。"""
+
+CITATION_ALIGNMENT_SYSTEM_PROMPT = """你是一位严格的学术论文审稿人，专门检查引用内容与原文的对应关系。
+输出有效的 JSON 格式。"""
+
+CITATION_ALIGNMENT_USER_PROMPT = """请检查以下章节中的引用是否与对应论文内容相符：
+
+章节标题：{section_title}
+章节内容：
+{content}
+
+可用论文列表（编号对应 [N] 引用）：
+{numbered_papers}
+
+请检查每处引用的准确性，输出 JSON：
+{{
+    "issues": [
+        {{
+            "citation_number": 1,
+            "description": "引用内容与原论文不匹配的说明",
+            "suggestion": "修改建议"
+        }}
+    ]
+}}
+
+如所有引用均准确，issues 返回空数组。"""

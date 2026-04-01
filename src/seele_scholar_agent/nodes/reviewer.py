@@ -15,6 +15,19 @@ from . import CITATION_PATTERN, invoke_with_retry
 logger = get_logger(__name__)
 
 
+def _build_numbered_papers_summary(papers: list[PaperMetadata]) -> str:
+    if not papers:
+        return "无"
+    lines = []
+    for i, p in enumerate(papers, 1):
+        authors_str = ", ".join(p.authors[:3])
+        if len(p.authors) > 3:
+            authors_str += " et al."
+        abstract_snippet = p.abstract[:120] + "..." if len(p.abstract) > 120 else p.abstract
+        lines.append(f"[{i}] {p.title} — {authors_str}. {abstract_snippet}")
+    return "\n".join(lines)
+
+
 class ReviewerNode:
     def __init__(self, llm: ChatOpenAI, prompts: PromptsConfig):
         self.llm = llm
@@ -25,8 +38,15 @@ class ReviewerNode:
                 ("user", self.prompts.reviewer_user_prompt),
             ]
         )
+        self.citation_alignment_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", self.prompts.citation_alignment_system_prompt),
+                ("user", self.prompts.citation_alignment_user_prompt),
+            ]
+        )
         self.parser = JsonOutputParser()
         self.chain = self.prompt | self.llm | self.parser
+        self.citation_chain = self.citation_alignment_prompt | self.llm | self.parser
 
     async def review(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]
@@ -75,6 +95,16 @@ class ReviewerNode:
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
+        papers = state.get("papers", [])
+        if papers and section.content:
+            alignment_issues = await self._verify_citation_alignment(
+                section.title, section.content, papers
+            )
+            if alignment_issues:
+                review.issues.extend(alignment_issues)
+                if review.approved:
+                    review = review.model_copy(update={"approved": False})
+
         record = {
             "section": section.title,
             "score": review.score,
@@ -103,6 +133,38 @@ class ReviewerNode:
                     )
                 )
         return issues
+
+    async def _verify_citation_alignment(
+        self, section_title: str, content: str, papers: list[PaperMetadata]
+    ) -> list[ReviewIssue]:
+        cited_numbers = {int(m) for m in CITATION_PATTERN.findall(content)}
+        valid_cited = {n for n in cited_numbers if 1 <= n <= len(papers)}
+        if not valid_cited:
+            return []
+
+        numbered_papers = _build_numbered_papers_summary(papers)
+        try:
+            result = await invoke_with_retry(
+                self.citation_chain,
+                {
+                    "section_title": section_title,
+                    "content": content,
+                    "numbered_papers": numbered_papers,
+                },
+            )
+            raw_issues = result.get("issues", [])
+            return [
+                ReviewIssue(
+                    type="citation_mismatch",
+                    description=item.get("description", ""),
+                    suggestion=item.get("suggestion", ""),
+                    location=f"[{item.get('citation_number', '?')}]",
+                )
+                for item in raw_issues
+            ]
+        except Exception as e:
+            logger.warning("citation alignment check failed", error=str(e))
+            return []
 
     async def _handle_approved(
         self, state: AgentState, section: Any, review: ReviewResult, record: dict[str, Any]

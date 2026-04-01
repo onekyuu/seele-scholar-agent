@@ -1,4 +1,4 @@
-"""Unit tests for WriterNode — W-01 through W-13."""
+"""Unit tests for WriterNode — W-01 through W-17."""
 
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -236,3 +236,83 @@ async def test_writer_revision_count_unchanged_after_write(
         result = await node.write(state_with_outline)
 
     assert result["sections"][0].revision_count == 0
+
+
+# ---------------------------------------------------------------------------
+# W-14: _build_previous_sections_context with completed sections → contains title and content
+# ---------------------------------------------------------------------------
+
+
+def test_writer_build_previous_sections_with_content(mock_llm, mock_prompts):
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+    sections = [
+        SectionDraft(
+            section_id="s0",
+            title="Introduction",
+            description="",
+            order_index=1,
+            content="This is the introduction content about LLMs.",
+            status="approved",
+        ),
+        SectionDraft(
+            section_id="s1",
+            title="Methods",
+            description="",
+            order_index=2,
+            content="",
+            status="pending",
+        ),
+    ]
+    result = node._build_previous_sections_context(sections, current_index=1)
+
+    assert "Introduction" in result
+    assert "introduction content" in result
+
+
+# ---------------------------------------------------------------------------
+# W-15: _build_previous_sections_context no completed sections → returns "无"
+# ---------------------------------------------------------------------------
+
+
+def test_writer_build_previous_sections_empty(mock_llm, mock_prompts):
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+    sections = [
+        SectionDraft(
+            section_id="s0",
+            title="Introduction",
+            description="",
+            order_index=1,
+            content="",
+            status="pending",
+        ),
+    ]
+    result = node._build_previous_sections_context(sections, current_index=0)
+
+    assert result == "无"
+
+
+# ---------------------------------------------------------------------------
+# W-16: _build_numbered_papers with papers → contains [N] numbered entries
+# ---------------------------------------------------------------------------
+
+
+def test_writer_build_numbered_papers_with_papers(mock_llm, mock_prompts, sample_papers):
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+    result = node._build_numbered_papers(sample_papers)
+
+    assert "[1]" in result
+    assert "[2]" in result
+    assert "[3]" in result
+    assert "Attention Is All You Need" in result
+
+
+# ---------------------------------------------------------------------------
+# W-17: _build_numbered_papers with empty list → returns "无"
+# ---------------------------------------------------------------------------
+
+
+def test_writer_build_numbered_papers_empty(mock_llm, mock_prompts):
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+    result = node._build_numbered_papers([])
+
+    assert result == "无"

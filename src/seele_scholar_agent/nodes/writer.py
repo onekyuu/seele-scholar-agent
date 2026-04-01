@@ -6,8 +6,8 @@ from langchain_openai import ChatOpenAI
 from ..agent_config import PromptsConfig, RAGRetrieverFunc
 from ..i18n import t
 from ..logging import get_logger
-from ..state import AgentState
-from . import invoke_with_retry
+from ..state import AgentState, PaperMetadata, SectionDraft
+from . import PREVIOUS_SECTION_MAX_CHARS, invoke_with_retry
 
 logger = get_logger(__name__)
 
@@ -51,6 +51,8 @@ class WriterNode:
 
         outline_json = self._build_outline_json(state.get("outline"))
         review_comments = self._build_review_comments(section)
+        previous_sections = self._build_previous_sections_context(sections, current_index)
+        numbered_papers = self._build_numbered_papers(state.get("papers", []))
 
         try:
             result = await invoke_with_retry(
@@ -61,6 +63,8 @@ class WriterNode:
                     "section_title": section.title,
                     "section_description": section.description,
                     "outline_json": outline_json,
+                    "previous_sections": previous_sections,
+                    "numbered_papers": numbered_papers,
                     "rag_context": rag_context,
                     "review_comments": review_comments,
                 },
@@ -108,6 +112,34 @@ class WriterNode:
         if not section.review_comments:
             return "无"
         return "\n".join([f"- {c}" for c in section.review_comments])
+
+    def _build_previous_sections_context(
+        self, sections: list[SectionDraft], current_index: int
+    ) -> str:
+        completed = [
+            s for s in sections[:current_index] if s.content and s.status in ("approved", "review")
+        ]
+        if not completed:
+            return "无"
+        parts = []
+        for s in completed:
+            snippet = s.content[:PREVIOUS_SECTION_MAX_CHARS]
+            if len(s.content) > PREVIOUS_SECTION_MAX_CHARS:
+                snippet += "..."
+            parts.append(f"[{s.title}]\n{snippet}")
+        return "\n\n".join(parts)
+
+    def _build_numbered_papers(self, papers: list[PaperMetadata]) -> str:
+        if not papers:
+            return "无"
+        lines = []
+        for i, p in enumerate(papers, 1):
+            authors_str = ", ".join(p.authors[:3])
+            if len(p.authors) > 3:
+                authors_str += " et al."
+            abstract_snippet = p.abstract[:150] + "..." if len(p.abstract) > 150 else p.abstract
+            lines.append(f"[{i}] {p.title} — {authors_str}. {abstract_snippet}")
+        return "\n".join(lines)
 
     async def _move_to_next(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]
