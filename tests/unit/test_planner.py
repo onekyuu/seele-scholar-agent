@@ -1,4 +1,4 @@
-"""Unit tests for PlannerNode — P-01 through P-10."""
+"""Unit tests for PlannerNode — P-01 through P-14."""
 
 from typing import cast
 from unittest.mock import AsyncMock, patch
@@ -267,3 +267,145 @@ async def test_planner_section_ids(mock_llm, mock_prompts, state_with_papers):
 
     ids = [s.section_id for s in result["sections"]]
     assert ids == ["section_0", "section_1", "section_2"]
+
+
+# ---------------------------------------------------------------------------
+# P-11: suggested_figures from LLM result → written into SectionOutline
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_suggested_figures_parsed(mock_llm, mock_prompts, state_with_papers):
+    """P-11: suggested_figures from LLM output are stored in SectionOutline."""
+    result_data = _make_llm_result(
+        sections=[
+            {
+                "title": "Introduction",
+                "description": "Intro",
+                "order": 1,
+                "key_points": [],
+                "suggested_figures": [
+                    "Bar chart comparing model accuracy",
+                    "Timeline of LLM releases",
+                ],
+            },
+            {
+                "title": "Conclusion",
+                "description": "Summary",
+                "order": 2,
+                "key_points": [],
+                "suggested_figures": [],
+            },
+        ]
+    )
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=result_data,
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state_with_papers)
+
+    intro_outline = result["outline"].sections[0]
+    assert intro_outline.suggested_figures == [
+        "Bar chart comparing model accuracy",
+        "Timeline of LLM releases",
+    ]
+    conclusion_outline = result["outline"].sections[1]
+    assert conclusion_outline.suggested_figures == []
+
+
+# ---------------------------------------------------------------------------
+# P-12: section missing suggested_figures key → defaults to []
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_suggested_figures_missing_key_defaults_empty(
+    mock_llm, mock_prompts, state_with_papers
+):
+    """P-12: Section without suggested_figures key defaults to empty list."""
+    result_data = _make_llm_result(
+        sections=[
+            {"title": "Introduction", "description": "Intro", "order": 1, "key_points": []},
+        ]
+    )
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=result_data,
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state_with_papers)
+
+    assert result["outline"].sections[0].suggested_figures == []
+
+
+# ---------------------------------------------------------------------------
+# P-13: suggested_figures preserved across multiple sections independently
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_suggested_figures_per_section_independent(
+    mock_llm, mock_prompts, state_with_papers
+):
+    """P-13: Each section carries its own suggested_figures independently."""
+    result_data = _make_llm_result(
+        sections=[
+            {
+                "title": "Methods",
+                "description": "Methodology",
+                "order": 1,
+                "key_points": [],
+                "suggested_figures": ["Flowchart of pipeline"],
+            },
+            {
+                "title": "Results",
+                "description": "Experiments",
+                "order": 2,
+                "key_points": [],
+                "suggested_figures": ["Table: BLEU scores", "Figure: loss curves"],
+            },
+            {
+                "title": "Discussion",
+                "description": "Analysis",
+                "order": 3,
+                "key_points": [],
+                "suggested_figures": [],
+            },
+        ]
+    )
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=result_data,
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state_with_papers)
+
+    sections = result["outline"].sections
+    assert sections[0].suggested_figures == ["Flowchart of pipeline"]
+    assert sections[1].suggested_figures == ["Table: BLEU scores", "Figure: loss curves"]
+    assert sections[2].suggested_figures == []
+
+
+# ---------------------------------------------------------------------------
+# P-14: default outline fallback → suggested_figures is [] for all sections
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_default_outline_has_empty_suggested_figures(
+    mock_llm, mock_prompts, state_with_papers
+):
+    """P-14: Fallback outline sections have empty suggested_figures."""
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        side_effect=Exception("timeout"),
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state_with_papers)
+
+    for section in result["outline"].sections:
+        assert section.suggested_figures == []

@@ -1,5 +1,6 @@
-"""Unit tests for WriterNode — W-01 through W-17."""
+"""Unit tests for WriterNode — W-01 through W-24."""
 
+import re
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -316,3 +317,210 @@ def test_writer_build_numbered_papers_empty(mock_llm, mock_prompts):
     result = node._build_numbered_papers([])
 
     assert result == "无"
+
+
+# ---------------------------------------------------------------------------
+# W-18: _build_suggested_figures — outline=None → returns "无"
+# ---------------------------------------------------------------------------
+
+
+def test_writer_build_suggested_figures_no_outline(mock_llm, mock_prompts, base_state):
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+    section = SectionDraft(section_id="s0", title="Introduction", description="", order_index=1)
+    state = cast(AgentState, {**base_state, "outline": None})
+
+    result = node._build_suggested_figures(section, state)
+
+    assert result == "无"
+
+
+# ---------------------------------------------------------------------------
+# W-19: _build_suggested_figures — section title matched → figures returned
+# ---------------------------------------------------------------------------
+
+
+def test_writer_build_suggested_figures_matched(mock_llm, mock_prompts, state_with_outline):
+    from seele_scholar_agent.state import OutlineStructure, SectionOutline
+
+    outline = OutlineStructure(
+        title="Survey",
+        abstract="",
+        sections=[
+            SectionOutline(
+                title="Introduction",
+                description="",
+                order=1,
+                suggested_figures=["Bar chart of accuracy", "Timeline of models"],
+            ),
+            SectionOutline(title="Conclusion", description="", order=2, suggested_figures=[]),
+        ],
+        keywords=[],
+    )
+    state = cast(AgentState, {**state_with_outline, "outline": outline})
+    section = SectionDraft(section_id="s0", title="Introduction", description="", order_index=1)
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+
+    result = node._build_suggested_figures(section, state)
+
+    assert "Bar chart of accuracy" in result
+    assert "Timeline of models" in result
+    assert result.startswith("- ")
+
+
+# ---------------------------------------------------------------------------
+# W-20: _build_suggested_figures — section title not in outline → returns "无"
+# ---------------------------------------------------------------------------
+
+
+def test_writer_build_suggested_figures_no_match(mock_llm, mock_prompts, state_with_outline):
+    section = SectionDraft(
+        section_id="s0", title="NonExistentSection", description="", order_index=1
+    )
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+
+    result = node._build_suggested_figures(section, state_with_outline)
+
+    assert result == "无"
+
+
+# ---------------------------------------------------------------------------
+# W-21: _build_suggested_figures — matched section has empty list → returns "无"
+# ---------------------------------------------------------------------------
+
+
+def test_writer_build_suggested_figures_empty_list(mock_llm, mock_prompts, state_with_outline):
+    from seele_scholar_agent.state import OutlineStructure, SectionOutline
+
+    outline = OutlineStructure(
+        title="Survey",
+        abstract="",
+        sections=[
+            SectionOutline(title="Introduction", description="", order=1, suggested_figures=[]),
+        ],
+        keywords=[],
+    )
+    state = cast(AgentState, {**state_with_outline, "outline": outline})
+    section = SectionDraft(section_id="s0", title="Introduction", description="", order_index=1)
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+
+    result = node._build_suggested_figures(section, state)
+
+    assert result == "无"
+
+
+# ---------------------------------------------------------------------------
+# W-22: _build_rag_context — carries chunk_id in [chunk_id:xxx] format
+# ---------------------------------------------------------------------------
+
+
+def test_writer_build_rag_context_includes_chunk_id(mock_llm, mock_prompts):
+    from seele_scholar_agent.state import DocumentChunk
+
+    chunks = [
+        DocumentChunk(chunk_id="abc123", content="Transformer paper content.", source="arxiv"),
+        DocumentChunk(chunk_id="def456", content="BERT paper content.", source="s2"),
+    ]
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+    result = node._build_rag_context(chunks)
+
+    assert "[chunk_id:abc123]" in result
+    assert "Transformer paper content." in result
+    assert "[chunk_id:def456]" in result
+    assert "BERT paper content." in result
+
+
+# ---------------------------------------------------------------------------
+# W-23: _build_rag_context — empty input → returns "无"
+# ---------------------------------------------------------------------------
+
+
+def test_writer_build_rag_context_empty(mock_llm, mock_prompts):
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+    assert node._build_rag_context([]) == "无"
+    assert node._build_rag_context(None) == "无"
+
+
+# ---------------------------------------------------------------------------
+# W-24: _clean_content — preserves figure/table placeholders intact
+# ---------------------------------------------------------------------------
+
+
+def test_writer_clean_content_preserves_figure_placeholder(mock_llm, mock_prompts):
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+    raw = (
+        "Here is the introduction.\n"
+        "{{FIGURE: Bar chart of accuracy | chunks:[abc123,def456]}}\n"
+        "{{TABLE: Comparison of methods | chunks:[xyz789]}}\n"
+        "More text follows."
+    )
+    cleaned = node._clean_content(raw)
+
+    assert "{{FIGURE: Bar chart of accuracy | chunks:[abc123,def456]}}" in cleaned
+    assert "{{TABLE: Comparison of methods | chunks:[xyz789]}}" in cleaned
+    assert "More text follows." in cleaned
+
+
+# ---------------------------------------------------------------------------
+# Figure placeholder regex tests
+# ---------------------------------------------------------------------------
+
+FIGURE_PATTERN = re.compile(r"\{\{(FIGURE|TABLE): (.+?) \| chunks:\[([^\]]*)\]\}\}")
+
+
+def test_figure_pattern_matches_figure_with_chunks():
+    content = "{{FIGURE: Bar chart comparing Top-1 accuracy | chunks:[abc123,def456]}}"
+    matches = FIGURE_PATTERN.findall(content)
+
+    assert len(matches) == 1
+    fig_type, description, chunks_str = matches[0]
+    assert fig_type == "FIGURE"
+    assert description == "Bar chart comparing Top-1 accuracy"
+    assert chunks_str == "abc123,def456"
+
+
+def test_figure_pattern_matches_table_with_single_chunk():
+    content = "{{TABLE: Comparison of model parameters | chunks:[xyz789]}}"
+    matches = FIGURE_PATTERN.findall(content)
+
+    assert len(matches) == 1
+    fig_type, description, chunks_str = matches[0]
+    assert fig_type == "TABLE"
+    assert description == "Comparison of model parameters"
+    chunk_ids = [c.strip() for c in chunks_str.split(",") if c.strip()]
+    assert chunk_ids == ["xyz789"]
+
+
+def test_figure_pattern_matches_empty_chunks():
+    content = "{{FIGURE: Conceptual diagram of architecture | chunks:[]}}"
+    matches = FIGURE_PATTERN.findall(content)
+
+    assert len(matches) == 1
+    _, _, chunks_str = matches[0]
+    chunk_ids = [c.strip() for c in chunks_str.split(",") if c.strip()]
+    assert chunk_ids == []
+
+
+def test_figure_pattern_matches_multiple_placeholders():
+    content = (
+        "Some text.\n"
+        "{{FIGURE: Accuracy bar chart | chunks:[c1,c2]}}\n"
+        "More text.\n"
+        "{{TABLE: Method comparison | chunks:[c3]}}\n"
+        "End."
+    )
+    matches = FIGURE_PATTERN.findall(content)
+
+    assert len(matches) == 2
+    assert matches[0][0] == "FIGURE"
+    assert matches[1][0] == "TABLE"
+
+
+def test_figure_pattern_does_not_match_malformed_placeholder():
+    malformed_cases = [
+        "{{FIGURE: missing pipe and chunks}}",
+        "{{GRAPH: wrong type | chunks:[c1]}}",
+        "{FIGURE: single brace | chunks:[c1]}",
+    ]
+    for case in malformed_cases:
+        matches = FIGURE_PATTERN.findall(case)
+        assert matches == [], f"Should not match: {case}"
