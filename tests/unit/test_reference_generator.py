@@ -1,12 +1,11 @@
-"""Unit tests for ReferenceGeneratorNode — REF-01 through REF-06."""
-
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from seele_scholar_agent.nodes.reference_generator import ReferenceGeneratorNode
 from seele_scholar_agent.state import AgentState, PaperMetadata, SectionDraft
+from seele_scholar_agent.tools.crossref import CrossRefMetadata, extract_doi_from_url
 
 
 def _make_section(content: str, section_id: str = "s0", title: str = "Intro") -> SectionDraft:
@@ -30,8 +29,13 @@ async def test_reference_generator_cited_papers_returned(base_state, sample_pape
     sections = [_make_section("See [1] and [2] for details.")]
     state = cast(AgentState, {**base_state, "papers": sample_papers, "sections": sections})
 
-    node = ReferenceGeneratorNode()
-    result = await node.generate(state)
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
 
     refs = result["references"]
     assert len(refs) == 2
@@ -50,8 +54,13 @@ async def test_reference_generator_no_citations_generates_full_list(base_state, 
     sections = [_make_section("This section has no citation markers.")]
     state = cast(AgentState, {**base_state, "papers": sample_papers, "sections": sections})
 
-    node = ReferenceGeneratorNode()
-    result = await node.generate(state)
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
 
     refs = result["references"]
     assert len(refs) == len(sample_papers)
@@ -65,12 +74,16 @@ async def test_reference_generator_no_citations_generates_full_list(base_state, 
 
 @pytest.mark.asyncio
 async def test_reference_generator_out_of_range_citation_skipped(base_state, sample_papers):
-    # sample_papers has 3 entries; [99] is out of range
     sections = [_make_section("See [1] and [99].")]
     state = cast(AgentState, {**base_state, "papers": sample_papers, "sections": sections})
 
-    node = ReferenceGeneratorNode()
-    result = await node.generate(state)
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
 
     refs = result["references"]
     numbers = {r.number for r in refs}
@@ -106,8 +119,13 @@ async def test_reference_generator_formatted_field_structure(base_state, sample_
     sections = [_make_section("See [1].")]
     state = cast(AgentState, {**base_state, "papers": sample_papers, "sections": sections})
 
-    node = ReferenceGeneratorNode()
-    result = await node.generate(state)
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
 
     ref = result["references"][0]
     assert ref.number == 1
@@ -131,11 +149,189 @@ async def test_reference_generator_deduplicates_citations_across_sections(
     ]
     state = cast(AgentState, {**base_state, "papers": sample_papers, "sections": sections})
 
-    node = ReferenceGeneratorNode()
-    result = await node.generate(state)
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
 
     refs = result["references"]
     numbers = [r.number for r in refs]
-    # [1] should appear exactly once even though cited in two sections
     assert numbers.count(1) == 1
     assert set(numbers) == {1, 2}
+
+
+# ---------------------------------------------------------------------------
+# REF-07: CrossRef returns metadata → year/venue/doi populated from API
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reference_generator_crossref_enriches_year_venue_doi(base_state, sample_papers):
+    sections = [_make_section("See [1].")]
+    state = cast(AgentState, {**base_state, "papers": sample_papers, "sections": sections})
+
+    cr_meta = CrossRefMetadata(
+        doi="10.48550/arXiv.1706.03762",
+        year=2017,
+        venue="Advances in Neural Information Processing Systems",
+        authors=["Vaswani, Ashish", "Shazeer, Noam"],
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=cr_meta,
+    ):
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
+
+    ref = result["references"][0]
+    assert ref.year == 2017
+    assert ref.venue == "Advances in Neural Information Processing Systems"
+    assert ref.doi == "10.48550/arXiv.1706.03762"
+    assert "Vaswani, Ashish" in ref.authors
+
+
+# ---------------------------------------------------------------------------
+# REF-08: CrossRef returns no authors → fallback to PaperMetadata authors
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reference_generator_crossref_empty_authors_falls_back(base_state, sample_papers):
+    sections = [_make_section("See [1].")]
+    state = cast(AgentState, {**base_state, "papers": sample_papers, "sections": sections})
+
+    cr_meta = CrossRefMetadata(
+        doi="10.48550/arXiv.1706.03762", year=2017, venue="NeurIPS", authors=[]
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=cr_meta,
+    ):
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
+
+    ref = result["references"][0]
+    assert ref.authors == sample_papers[0].authors
+
+
+# ---------------------------------------------------------------------------
+# REF-09: CrossRef API fails (returns None) → fallback to local year extraction
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reference_generator_crossref_failure_falls_back_to_local(base_state):
+    paper = PaperMetadata(
+        paper_id="arxiv:2301.00001",
+        title="Test Paper",
+        authors=["Author A"],
+        abstract="Published in 2021.",
+        url="https://doi.org/10.1234/test",
+        source="arxiv",
+    )
+    sections = [_make_section("See [1].")]
+    state = cast(AgentState, {**base_state, "papers": [paper], "sections": sections})
+
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
+
+    ref = result["references"][0]
+    assert ref.year == 2021
+    assert ref.venue is None
+
+
+# ---------------------------------------------------------------------------
+# REF-10: Paper with DOI URL → doi field populated from URL extraction fallback
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reference_generator_doi_extracted_from_url_on_crossref_failure(base_state):
+    paper = PaperMetadata(
+        paper_id="oa:W001",
+        title="OpenAlex Paper",
+        authors=["Researcher"],
+        abstract="Some abstract.",
+        url="https://doi.org/10.1038/nature12373",
+        source="openalex",
+    )
+    sections = [_make_section("See [1].")]
+    state = cast(AgentState, {**base_state, "papers": [paper], "sections": sections})
+
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
+
+    ref = result["references"][0]
+    assert ref.doi == "10.1038/nature12373"
+
+
+# ---------------------------------------------------------------------------
+# REF-11: Paper with no URL → doi is None when CrossRef also returns None
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reference_generator_no_url_doi_is_none(base_state):
+    paper = PaperMetadata(
+        paper_id="s2:xyz",
+        title="No URL Paper",
+        authors=["Unknown"],
+        abstract="Abstract without URL.",
+        source="semantic_scholar",
+    )
+    sections = [_make_section("See [1].")]
+    state = cast(AgentState, {**base_state, "papers": [paper], "sections": sections})
+
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
+
+    ref = result["references"][0]
+    assert ref.doi is None
+
+
+# ---------------------------------------------------------------------------
+# REF-12: extract_doi_from_url — DOI URL, ArXiv URL, and non-DOI URL
+# ---------------------------------------------------------------------------
+
+
+def test_extract_doi_from_doi_org_url():
+    assert extract_doi_from_url("https://doi.org/10.1038/nature12373") == "10.1038/nature12373"
+
+
+def test_extract_doi_from_dx_doi_org_url():
+    assert extract_doi_from_url("https://dx.doi.org/10.1000/xyz123") == "10.1000/xyz123"
+
+
+def test_extract_doi_from_arxiv_url():
+    doi = extract_doi_from_url("https://arxiv.org/abs/1706.03762")
+    assert doi == "10.48550/arXiv.1706.03762"
+
+
+def test_extract_doi_from_non_doi_url_returns_none():
+    assert extract_doi_from_url("https://arxiv.org/pdf/1706.03762") is None
+
+
+def test_extract_doi_from_empty_string_returns_none():
+    assert extract_doi_from_url("") is None

@@ -86,6 +86,7 @@ class ReferenceEntry(BaseModel):
     year: int | None = None
     venue: str | None = None
     url: str | None = None
+    doi: str | None = None
     formatted: str
 
 

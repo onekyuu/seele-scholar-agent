@@ -1,17 +1,20 @@
+import asyncio
 import re
 from collections.abc import AsyncIterator
 from typing import Any
 
 from ..logging import get_logger
 from ..state import AgentState, PaperMetadata, ReferenceEntry
+from ..tools.crossref import CrossRefMetadata, extract_doi_from_url, fetch_metadata
 from . import CITATION_PATTERN, NodeStreamEvent
 
 logger = get_logger(__name__)
 
 _AUTHOR_YEAR_RE = re.compile(r"(\d{4})")
+_CROSSREF_CONCURRENCY = 5
 
 
-def _extract_year(paper: PaperMetadata) -> int | None:
+def _extract_year_from_paper(paper: PaperMetadata) -> int | None:
     for field in (paper.url or "", paper.abstract or ""):
         m = _AUTHOR_YEAR_RE.search(field)
         if m:
@@ -45,6 +48,22 @@ def _collect_cited_numbers(sections_content: list[str]) -> set[int]:
     return cited
 
 
+async def _enrich_from_crossref(
+    paper: PaperMetadata,
+    semaphore: asyncio.Semaphore,
+) -> CrossRefMetadata | None:
+    doi: str | None = None
+    if paper.url:
+        doi = extract_doi_from_url(paper.url)
+    if not doi and paper.pdf_url:
+        doi = extract_doi_from_url(paper.pdf_url)
+    if not doi:
+        return None
+
+    async with semaphore:
+        return await fetch_metadata(doi)
+
+
 class ReferenceGeneratorNode:
     async def generate(self, state: AgentState) -> dict[str, Any]:
         papers = state.get("papers", [])
@@ -55,26 +74,45 @@ class ReferenceGeneratorNode:
             return {"references": [], "status": "completed"}
 
         cited_numbers = _collect_cited_numbers([s.content for s in sections if s.content])
-
         if not cited_numbers:
             logger.info("no citations found in sections, generating full reference list")
             cited_numbers = set(range(1, len(papers) + 1))
 
-        entries: list[ReferenceEntry] = []
+        target_papers: list[tuple[int, PaperMetadata]] = []
         for num in sorted(cited_numbers):
             idx = num - 1
             if idx < 0 or idx >= len(papers):
                 logger.warning("citation number out of range", number=num, total=len(papers))
                 continue
-            paper = papers[idx]
-            year = _extract_year(paper)
+            target_papers.append((num, papers[idx]))
+
+        semaphore = asyncio.Semaphore(_CROSSREF_CONCURRENCY)
+        crossref_results = await asyncio.gather(
+            *[_enrich_from_crossref(paper, semaphore) for _, paper in target_papers]
+        )
+
+        entries: list[ReferenceEntry] = []
+        for (num, paper), cr in zip(target_papers, crossref_results, strict=True):
+            if cr is not None:
+                year = cr.year
+                venue = cr.venue
+                authors = cr.authors if cr.authors else paper.authors
+                doi = cr.doi or None
+            else:
+                year = _extract_year_from_paper(paper)
+                venue = None
+                authors = paper.authors
+                doi = extract_doi_from_url(paper.url) if paper.url else None
+
             entry = ReferenceEntry(
                 number=num,
                 paper_id=paper.paper_id,
                 title=paper.title,
-                authors=paper.authors,
+                authors=authors,
                 year=year,
+                venue=venue,
                 url=paper.url,
+                doi=doi,
                 formatted="",
             )
             entry = entry.model_copy(update={"formatted": _format_reference(entry)})

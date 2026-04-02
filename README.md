@@ -10,7 +10,7 @@
 - **章节撰写**：结合 RAG 上下文自动撰写论文章节，在正文中插入图表占位符（含 chunk_id 绑定）
 - **审核修订**：人工审核机制，支持多轮修改
 - **一致性检查**：检查各章节之间的术语、引用、逻辑一致性
-- **参考文献生成**：自动生成标准格式参考文献列表
+- **参考文献生成**：自动调用 CrossRef API 验证 DOI、补全发表年份与期刊/会议信息，生成准确的标准格式参考文献列表；API 不可用时自动回退到本地提取
 - **流式调用**：所有节点支持 `astream()` 方法，可实时输出 token
 - **多模型支持**：支持 OpenAI、DeepSeek、Groq 及任何 OpenAI 兼容 API
 
@@ -467,11 +467,12 @@ async def render_figures(content: str, rag_store) -> str:
 | `number` | `int` | 引用编号，对应正文中的 `[N]` |
 | `paper_id` | `str` | 论文 ID |
 | `title` | `str` | 论文标题 |
-| `authors` | `list[str]` | 作者列表 |
-| `year` | `int \| None` | 发表年份 |
-| `venue` | `str \| None` | 发表期刊/会议 |
+| `authors` | `list[str]` | 作者列表（CrossRef 有数据时使用 API 返回值） |
+| `year` | `int \| None` | 发表年份（优先从 CrossRef 获取） |
+| `venue` | `str \| None` | 发表期刊/会议（由 CrossRef 补全，本地无法提取） |
 | `url` | `str \| None` | 论文链接 |
-| `formatted` | `str` | 格式化的参考文献字符串（如 `[1] Title — Author1, Author2. Year.`） |
+| `doi` | `str \| None` | DOI 标识符（从 URL 提取或由 CrossRef 返回） |
+| `formatted` | `str` | 格式化的参考文献字符串（如 `[1] Author. Title. Venue. (Year)`） |
 
 ---
 
@@ -520,6 +521,8 @@ seele_scholar_agent/
 ├── agent_config.py         # PromptsConfig 和 RAGRetrieverFunc 类型定义
 ├── logging.py              # 结构化日志配置
 ├── i18n.py                 # 多语言支持
+├── tools/
+│   └── crossref.py         # CrossRef REST API 查询（DOI 验证、元数据补全）
 └── nodes/
     ├── __init__.py         # NodeStreamEvent、_stream_llm_text、invoke_with_retry
     ├── topic_proposer.py   # 选题推荐节点
@@ -529,7 +532,7 @@ seele_scholar_agent/
     ├── reviewer.py         # 审稿节点
     ├── finalizer.py        # 摘要/结论生成节点
     ├── consistency_checker.py  # 一致性检查节点
-    ├── reference_generator.py  # 参考文献生成节点
+    ├── reference_generator.py  # 参考文献生成节点（含 CrossRef 集成）
     └── prompts.py          # 所有节点的默认 LLM 提示词
 ```
 
