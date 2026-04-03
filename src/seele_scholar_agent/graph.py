@@ -7,6 +7,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from seele_scholar_agent.nodes.topic_proposer import TopicProposerNode
 
+from .agent_config import PaperSearchFunc, PromptsConfig, RAGRetrieverFunc
 from .config import settings
 from .nodes.consistency_checker import ConsistencyCheckerNode
 from .nodes.finalizer import FinalizerNode
@@ -16,7 +17,6 @@ from .nodes.researcher import ResearcherNode
 from .nodes.reviewer import ReviewerNode
 from .nodes.writer import WriterNode
 from .state import AgentState
-from .agent_config import PromptsConfig, RAGRetrieverFunc
 
 
 def create_writing_graph(
@@ -25,12 +25,15 @@ def create_writing_graph(
     rag_retriever: RAGRetrieverFunc | None,
     semantic_scholar_key: str | None = None,
     openalex_email: str | None = None,
+    extra_paper_retrievers: list[PaperSearchFunc] | None = None,
 ) -> CompiledStateGraph:
     topic_proposer = TopicProposerNode(llm=model, prompts=prompts)
     researcher = ResearcherNode(
         llm=model,
+        prompts=prompts,
         semantic_scholar_key=semantic_scholar_key or settings.SEMANTIC_SCHOLAR_API_KEY,
         openalex_email=openalex_email,
+        extra_paper_retrievers=extra_paper_retrievers,
     )
     planner = PlannerNode(llm=model, prompts=prompts)
     writer = WriterNode(llm=model, prompts=prompts, rag_retriever=rag_retriever)
@@ -82,12 +85,15 @@ def create_simple_writing_graph(
     rag_retriever: RAGRetrieverFunc | None = None,
     semantic_scholar_key: str | None = None,
     openalex_email: str | None = None,
+    extra_paper_retrievers: list[PaperSearchFunc] | None = None,
 ) -> CompiledStateGraph:
     topic_proposer = TopicProposerNode(llm=model, prompts=prompts)
     researcher = ResearcherNode(
         llm=model,
+        prompts=prompts,
         semantic_scholar_key=semantic_scholar_key or settings.SEMANTIC_SCHOLAR_API_KEY,
         openalex_email=openalex_email,
+        extra_paper_retrievers=extra_paper_retrievers,
     )
     planner = PlannerNode(llm=model, prompts=prompts)
     writer = WriterNode(llm=model, prompts=prompts, rag_retriever=rag_retriever)

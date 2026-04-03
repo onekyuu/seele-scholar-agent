@@ -6,6 +6,7 @@ from typing import Any
 from httpx import AsyncClient, HTTPStatusError
 from langchain_core.language_models import BaseLanguageModel
 
+from seele_scholar_agent.agent_config import PaperSearchFunc, PromptsConfig
 from seele_scholar_agent.state import AgentState, PaperMetadata
 
 from ..logging import get_logger
@@ -16,7 +17,6 @@ from . import (
     HTTP_TIMEOUT,
     NodeStreamEvent,
 )
-from .prompts import TOPIC_TRANSLATION_SYSTEM_PROMPT, TOPIC_TRANSLATION_USER_PROMPT
 
 logger = get_logger(__name__)
 
@@ -299,17 +299,17 @@ class ResearcherNode:
     def __init__(
         self,
         llm: BaseLanguageModel | None = None,
-        qdrant_client: Any = None,
-        embedding_model: Any = None,
+        prompts: PromptsConfig | None = None,
         semantic_scholar_key: str | None = None,
         openalex_email: str | None = None,
+        extra_paper_retrievers: list[PaperSearchFunc] | None = None,
     ):
         self.llm = llm
+        self.prompts = prompts
         self.arxiv = ArxivRetriever()
         self.openalex = OpenAlexRetriever(email=openalex_email)
         self.ss = SemanticScholarRetriever(api_key=semantic_scholar_key)
-        self.qdrant = qdrant_client
-        self.embedding = embedding_model
+        self.extra_paper_retrievers: list[PaperSearchFunc] = extra_paper_retrievers or []
 
     def _needs_translation(self, topic: str) -> bool:
         for ch in topic:
@@ -340,9 +340,11 @@ class ResearcherNode:
         try:
             from langchain_core.messages import HumanMessage, SystemMessage
 
+            sys_prompt = self.prompts.topic_translation_system_prompt if self.prompts else ""
+            user_prompt = self.prompts.topic_translation_user_prompt if self.prompts else "{topic}"
             messages = [
-                SystemMessage(content=TOPIC_TRANSLATION_SYSTEM_PROMPT),
-                HumanMessage(content=TOPIC_TRANSLATION_USER_PROMPT.format(topic=topic)),
+                SystemMessage(content=sys_prompt),
+                HumanMessage(content=user_prompt.format(topic=topic)),
             ]
             response = await self.llm.ainvoke(messages)
             raw = response.content if hasattr(response, "content") else str(response)
@@ -382,7 +384,20 @@ class ResearcherNode:
             await asyncio.sleep(ARXIV_RATE_LIMIT_DELAY)
             arxiv_papers = await self.arxiv.search(query)
 
-            for paper in [*openalex_papers, *ss_papers, *arxiv_papers]:
+            extra_results: list[list[PaperMetadata]] = []
+            if self.extra_paper_retrievers:
+                extra_results = list(
+                    await asyncio.gather(
+                        *[retriever(query) for retriever in self.extra_paper_retrievers]
+                    )
+                )
+
+            for paper in [
+                *openalex_papers,
+                *ss_papers,
+                *arxiv_papers,
+                *[p for batch in extra_results for p in batch],
+            ]:
                 if paper.paper_id not in seen_ids:
                     seen_ids.add(paper.paper_id)
                     all_papers.append(paper)
@@ -422,7 +437,21 @@ class ResearcherNode:
             await asyncio.sleep(ARXIV_RATE_LIMIT_DELAY)
             arxiv_papers = await self.arxiv.search(query)
 
-            for paper in [*openalex_papers, *ss_papers, *arxiv_papers]:
+            extra_results: list[list[PaperMetadata]] = []
+            if self.extra_paper_retrievers:
+                yield NodeStreamEvent(type="progress", progress=f"searching_extra:{query}")
+                extra_results = list(
+                    await asyncio.gather(
+                        *[retriever(query) for retriever in self.extra_paper_retrievers]
+                    )
+                )
+
+            for paper in [
+                *openalex_papers,
+                *ss_papers,
+                *arxiv_papers,
+                *[p for batch in extra_results for p in batch],
+            ]:
                 if paper.paper_id not in seen_ids:
                     seen_ids.add(paper.paper_id)
                     all_papers.append(paper)

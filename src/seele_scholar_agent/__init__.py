@@ -1,3 +1,4 @@
+from .agent_config import PaperSearchFunc, RAGRetrieverFunc
 from .graph import create_simple_writing_graph, create_writing_graph
 from .logging import setup_logging
 from .nodes import NodeStreamEvent
@@ -30,4 +31,6 @@ __all__ = [
     "PaperMetadata",
     "OutlineStructure",
     "SectionDraft",
+    "RAGRetrieverFunc",
+    "PaperSearchFunc",
 ]

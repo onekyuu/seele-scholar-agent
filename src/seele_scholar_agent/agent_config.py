@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel
 
-from .state import DocumentChunk
+from .state import DocumentChunk, PaperMetadata
 
 
 class PromptsConfig(BaseModel):
@@ -20,6 +20,12 @@ class PromptsConfig(BaseModel):
     consistency_check_user_prompt: str
     citation_alignment_system_prompt: str
     citation_alignment_user_prompt: str
+    topic_translation_system_prompt: str
+    topic_translation_user_prompt: str
 
 
+# Inject document chunks into WriterNode for writing context (figures, data)
 RAGRetrieverFunc = Callable[[str], Awaitable[list[DocumentChunk]]]
+
+# Inject additional paper metadata sources into ResearcherNode (e.g. PubMed, IEEE, user library)
+PaperSearchFunc = Callable[[str], Awaitable[list[PaperMetadata]]]
