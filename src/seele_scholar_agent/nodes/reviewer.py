@@ -302,7 +302,7 @@ class ReviewerNode:
 
         updated = sections.copy()
         updated[index] = section.model_copy(
-            update={"status": "writing", "review_comments": section.review_comments + comments}
+            update={"status": "writing", "review_comments": comments}
         )
 
         return {

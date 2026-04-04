@@ -5,13 +5,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
-
+from seele_scholar_agent.nodes.consistency_checker import ConsistencyCheckerNode
+from seele_scholar_agent.nodes.finalizer import FinalizerNode
 from seele_scholar_agent.nodes.planner import PlannerNode
+from seele_scholar_agent.nodes.reference_generator import ReferenceGeneratorNode
 from seele_scholar_agent.nodes.reviewer import ReviewerNode
 from seele_scholar_agent.nodes.writer import WriterNode
-from seele_scholar_agent.nodes.finalizer import FinalizerNode
-from seele_scholar_agent.nodes.consistency_checker import ConsistencyCheckerNode
-from seele_scholar_agent.nodes.reference_generator import ReferenceGeneratorNode
 from seele_scholar_agent.state import AgentState, SectionDraft
 
 
@@ -353,8 +352,9 @@ async def test_finalizer_output_feeds_consistency_checker(mock_llm, mock_prompts
         check_result = await checker.check(checker_state)
 
     assert check_result["consistency_checked"] is True
-    assert len(check_result["consistency_issues"]) == 1
-    assert check_result["consistency_issues"][0].issue_type == "logic"
+    # 3 parallel sub-checks (terminology, logic, citation) each return 1 issue from the mock
+    assert len(check_result["consistency_issues"]) == 3
+    assert all(i.issue_type == "logic" for i in check_result["consistency_issues"])
 
 
 # ---------------------------------------------------------------------------

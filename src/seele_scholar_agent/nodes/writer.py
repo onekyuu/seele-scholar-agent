@@ -8,9 +8,53 @@ from ..agent_config import PromptsConfig, RAGRetrieverFunc
 from ..i18n import t
 from ..logging import get_logger
 from ..state import AgentState, PaperMetadata, SectionDraft
-from . import PREVIOUS_SECTION_MAX_CHARS, NodeStreamEvent, _stream_llm_text, invoke_with_retry
+from . import (
+    PREVIOUS_SECTION_MAX_CHARS,
+    SECTION_SUMMARY_MAX_CHARS,
+    NodeStreamEvent,
+    _stream_llm_text,
+    invoke_with_retry,
+)
 
 logger = get_logger(__name__)
+
+
+def _generate_section_summary(title: str, content: str) -> str:
+    """Generate a compact summary (~150 tokens) of a written section for use as prior context.
+
+    Uses a heuristic paragraph extraction — no extra LLM call needed.
+    """
+    if not content:
+        return f"[{title}]\n(empty)"
+
+    paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+    if not paragraphs:
+        snippet = content[:SECTION_SUMMARY_MAX_CHARS]
+        if len(content) > SECTION_SUMMARY_MAX_CHARS:
+            snippet += "..."
+        return f"[{title}]\n{snippet}"
+
+    parts: list[str] = []
+    total_chars = 0
+    for para in paragraphs:
+        remaining = SECTION_SUMMARY_MAX_CHARS - total_chars
+        if remaining <= 0:
+            break
+        if len(para) <= remaining:
+            parts.append(para)
+            total_chars += len(para)
+        else:
+            # End at a sentence boundary when possible
+            snippet = para[:remaining]
+            last_period = snippet.rfind(". ")
+            if last_period > remaining // 2:
+                snippet = snippet[: last_period + 1]
+            else:
+                snippet += "..."
+            parts.append(snippet)
+            break
+
+    return f"[{title}]\n" + "\n\n".join(parts)
 
 
 class WriterNode:
@@ -52,8 +96,20 @@ class WriterNode:
 
         outline_json = self._build_outline_json(state.get("outline"))
         review_comments = self._build_review_comments(section)
-        previous_sections = self._build_previous_sections_context(sections, current_index)
-        numbered_papers = self._build_numbered_papers(state.get("papers", []))
+
+        # Use pre-generated section summaries (cheaper than full content)
+        section_summaries: list[str] = list(state.get("section_summaries") or [])
+        previous_sections = self._build_previous_sections_context(
+            sections, current_index, section_summaries
+        )
+
+        # Use pre-built paper summaries from Researcher (cheaper than full abstract list)
+        paper_summaries: list[str] = state.get("paper_summaries") or []
+        numbered_papers = (
+            self._build_numbered_papers_from_summaries(paper_summaries)
+            if paper_summaries
+            else self._build_numbered_papers(state.get("papers", []))
+        )
 
         try:
             result = await invoke_with_retry(
@@ -95,7 +151,18 @@ class WriterNode:
             }
         )
 
-        return {"sections": updated_sections, "status": "reviewing"}
+        # Update section_summaries: overwrite the slot for this section index
+        # (handles both first write and revisions correctly)
+        updated_summaries = list(state.get("section_summaries") or [])
+        while len(updated_summaries) <= current_index:
+            updated_summaries.append("")
+        updated_summaries[current_index] = _generate_section_summary(section.title, content)
+
+        return {
+            "sections": updated_sections,
+            "section_summaries": updated_summaries,
+            "status": "reviewing",
+        }
 
     async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
         sections = state["sections"]
@@ -128,6 +195,9 @@ class WriterNode:
         else:
             rag_context = self._build_rag_context(state.get("rag_context"))
 
+        _section_summaries: list[str] = list(state.get("section_summaries") or [])
+        _paper_summaries: list[str] = state.get("paper_summaries") or []
+
         input_data = {
             "topic": state["topic"],
             "language": t(lang, "language_name"),
@@ -135,8 +205,14 @@ class WriterNode:
             "section_description": section.description,
             "suggested_figures": self._build_suggested_figures(section, state),
             "outline_json": self._build_outline_json(state.get("outline")),
-            "previous_sections": self._build_previous_sections_context(sections, current_index),
-            "numbered_papers": self._build_numbered_papers(state.get("papers", [])),
+            "previous_sections": self._build_previous_sections_context(
+                sections, current_index, _section_summaries
+            ),
+            "numbered_papers": (
+                self._build_numbered_papers_from_summaries(_paper_summaries)
+                if _paper_summaries
+                else self._build_numbered_papers(state.get("papers", []))
+            ),
             "rag_context": rag_context,
             "review_comments": self._build_review_comments(section),
         }
@@ -157,9 +233,19 @@ class WriterNode:
             }
         )
 
+        # Update section_summaries
+        _updated_summaries = list(state.get("section_summaries") or [])
+        while len(_updated_summaries) <= current_index:
+            _updated_summaries.append("")
+        _updated_summaries[current_index] = _generate_section_summary(section.title, content)
+
         yield NodeStreamEvent(
             type="result",
-            result={"sections": updated_sections, "status": "reviewing"},
+            result={
+                "sections": updated_sections,
+                "section_summaries": _updated_summaries,
+                "status": "reviewing",
+            },
         )
 
     def _build_suggested_figures(self, section: SectionDraft, state: AgentState) -> str:
@@ -194,8 +280,23 @@ class WriterNode:
         return "\n".join([f"- {c}" for c in section.review_comments])
 
     def _build_previous_sections_context(
-        self, sections: list[SectionDraft], current_index: int
+        self,
+        sections: list[SectionDraft],
+        current_index: int,
+        section_summaries: list[str] | None = None,
     ) -> str:
+        """Build context string for sections written before the current one.
+
+        Prefers ``section_summaries`` (pre-generated compact summaries, ~150 tokens each)
+        over full section content to keep the prompt lean.
+        """
+        if section_summaries is not None:
+            prev = [s for s in section_summaries[:current_index] if s]
+            if not prev:
+                return "无"
+            return "\n\n---\n\n".join(prev)
+
+        # Fallback: build from section content (legacy path for states without summaries)
         completed = [
             s for s in sections[:current_index] if s.content and s.status in ("approved", "review")
         ]
@@ -220,6 +321,12 @@ class WriterNode:
             abstract_snippet = p.abstract[:150] + "..." if len(p.abstract) > 150 else p.abstract
             lines.append(f"[{i}] {p.title} — {authors_str}. {abstract_snippet}")
         return "\n".join(lines)
+
+    def _build_numbered_papers_from_summaries(self, paper_summaries: list[str]) -> str:
+        """Use pre-built compact paper summaries from ResearcherNode (no abstract duplication)."""
+        if not paper_summaries:
+            return "无"
+        return "\n".join(paper_summaries)
 
     async def _move_to_next(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]

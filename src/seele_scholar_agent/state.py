@@ -117,6 +117,14 @@ class AgentState(TypedDict):
     current_review: ReviewResult | None
     rag_context: Annotated[list[DocumentChunk], operator.add]
 
+    # Writer 写完每章后生成的摘要，按章节索引定位（positional list，非累加）
+    # section_summaries[i] 对应 sections[i] 的内容摘要，约 150-200 tokens per item
+    section_summaries: list[str]
+
+    # Researcher 生成的精简文献摘要列表（每条 1-3 句话），与 papers 列表等长且一一对应
+    # 用于 Writer/Planner 的上下文构建，避免把完整 abstract 塞入 LLM prompt
+    paper_summaries: list[str]
+
     status: Literal[
         "idle",
         "researching",

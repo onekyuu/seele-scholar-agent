@@ -4,7 +4,6 @@ from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from seele_scholar_agent.nodes.consistency_checker import ConsistencyCheckerNode
 from seele_scholar_agent.state import AgentState, ConsistencyIssue, SectionDraft
 
@@ -54,8 +53,9 @@ async def test_consistency_checker_returns_issues_from_llm(mock_llm, mock_prompt
 
     assert result["consistency_checked"] is True
     issues = result["consistency_issues"]
-    assert len(issues) == 1
-    assert issues[0].issue_type == "terminology"
+    # 3 parallel sub-checks (terminology, logic, citation) each return 1 issue from the mock
+    assert len(issues) == 3
+    assert all(i.issue_type == "terminology" for i in issues)
 
 
 # ---------------------------------------------------------------------------

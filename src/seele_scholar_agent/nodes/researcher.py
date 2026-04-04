@@ -15,10 +15,50 @@ from . import (
     API_RETRY_BASE_DELAY,
     ARXIV_RATE_LIMIT_DELAY,
     HTTP_TIMEOUT,
+    PAPER_SUMMARY_ABSTRACT_CHARS,
     NodeStreamEvent,
 )
 
 logger = get_logger(__name__)
+
+# 保留在 state 中的 abstract 最大字符数（节省序列化体积）
+_PAPER_STATE_ABSTRACT_CHARS = 100
+
+
+def _compress_papers(papers: list[PaperMetadata]) -> tuple[list[PaperMetadata], list[str]]:
+    """Strip full abstracts from PaperMetadata (reduces state size) and build compact summaries.
+
+    Returns:
+        stripped_papers: PaperMetadata with abstract truncated to _PAPER_STATE_ABSTRACT_CHARS
+        paper_summaries: list of compact 1-3 sentence summary strings, one per paper
+    """
+    stripped: list[PaperMetadata] = []
+    summaries: list[str] = []
+    for idx, p in enumerate(papers, 1):
+        # Keep only a short stub of abstract in state — downstream nodes use paper_summaries
+        compact_abstract = p.abstract[:_PAPER_STATE_ABSTRACT_CHARS] if p.abstract else ""
+        stripped.append(p.model_copy(update={"abstract": compact_abstract}))
+
+        # Build compact summary: title, 2 authors, ~2 sentences of abstract
+        authors_str = ", ".join(p.authors[:2])
+        if len(p.authors) > 2:
+            authors_str += " et al."
+
+        abstract = (p.abstract or "").strip()
+        if len(abstract) > PAPER_SUMMARY_ABSTRACT_CHARS:
+            # Try to end at a sentence boundary
+            snippet = abstract[:PAPER_SUMMARY_ABSTRACT_CHARS]
+            last_period = snippet.rfind(". ")
+            if last_period > PAPER_SUMMARY_ABSTRACT_CHARS // 2:
+                snippet = snippet[: last_period + 1]
+            else:
+                snippet += "..."
+        else:
+            snippet = abstract
+
+        summaries.append(f"[{idx}] {p.title} — {authors_str}. {snippet}")
+
+    return stripped, summaries
 
 
 class ArxivRetriever:
@@ -404,15 +444,19 @@ class ResearcherNode:
 
         all_papers.sort(key=lambda x: x.relevance_score, reverse=True)
 
+        # Compress: strip full abstracts from state, build compact summaries for LLM context
+        stripped_papers, paper_summaries = _compress_papers(all_papers)
+
         logger.info(
             "research complete",
             topic=topic,
             queries=queries,
-            total_papers=len(all_papers),
+            total_papers=len(stripped_papers),
         )
 
         return {
-            "papers": all_papers,
+            "papers": stripped_papers,
+            "paper_summaries": paper_summaries,
             "search_queries": queries,
             "status": "planning",
         }
@@ -458,10 +502,13 @@ class ResearcherNode:
 
         all_papers.sort(key=lambda x: x.relevance_score, reverse=True)
 
+        stripped_papers, paper_summaries = _compress_papers(all_papers)
+
         yield NodeStreamEvent(
             type="result",
             result={
-                "papers": all_papers,
+                "papers": stripped_papers,
+                "paper_summaries": paper_summaries,
                 "search_queries": queries,
                 "status": "planning",
             },

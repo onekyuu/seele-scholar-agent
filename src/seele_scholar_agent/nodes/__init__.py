@@ -17,6 +17,10 @@ API_MAX_RETRIES = 3
 API_RETRY_BASE_DELAY = 3.0
 
 PREVIOUS_SECTION_MAX_CHARS = 500
+# Writer 节点为每章生成摘要的最大字符数（约 150 tokens，用于后续章节的上下文）
+SECTION_SUMMARY_MAX_CHARS = 600
+# Researcher 在 paper_summaries 中每篇文献 abstract 部分的最大字符数
+PAPER_SUMMARY_ABSTRACT_CHARS = 300
 
 CITATION_PATTERN = re.compile(r"\[(\d+)\]")
 
