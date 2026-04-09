@@ -288,7 +288,27 @@ class ReviewerNode:
             logger.warning("max revisions reached, forcing approval")
             updated = sections.copy()
             updated[index] = section.model_copy(update={"status": "approved"})
-            return {"sections": updated, "review_history": [record], "status": "completed"}
+
+            completed = state.get("sections_completed", [])
+            completed.append(section.title)
+
+            if index + 1 >= len(sections):
+                return {
+                    "sections": updated,
+                    "sections_completed": completed,
+                    "review_history": [record],
+                    "current_review": review.model_dump(),
+                    "status": "completed",
+                }
+
+            return {
+                "sections": updated,
+                "sections_completed": completed,
+                "current_section_index": index + 1,
+                "review_history": [record],
+                "current_review": review.model_dump(),
+                "status": "writing",
+            }
 
         comments = [
             t(lang, "review_round", round=section.revision_count, score=review.score),
