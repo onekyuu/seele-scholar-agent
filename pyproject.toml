@@ -1,6 +1,6 @@
 [project]
 name = "seele-scholar-agent"
-version = "0.10.1"
+version = "0.11.0"
 description = "An academic paper writing agent based on LangGraph"
 readme = "README.md"
 requires-python = ">=3.11"
