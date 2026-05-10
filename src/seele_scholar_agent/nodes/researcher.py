@@ -35,11 +35,9 @@ def _compress_papers(papers: list[PaperMetadata]) -> tuple[list[PaperMetadata], 
     stripped: list[PaperMetadata] = []
     summaries: list[str] = []
     for idx, p in enumerate(papers, 1):
-        # Keep only a short stub of abstract in state — downstream nodes use paper_summaries
         compact_abstract = p.abstract[:_PAPER_STATE_ABSTRACT_CHARS] if p.abstract else ""
         stripped.append(p.model_copy(update={"abstract": compact_abstract}))
 
-        # Build compact summary: title, 2 authors, ~2 sentences of abstract
         authors_str = ", ".join(p.authors[:2])
         if len(p.authors) > 2:
             authors_str += " et al."
@@ -68,7 +66,10 @@ class ArxivRetriever:
         self.top_k = top_k
 
     async def search(self, query: str) -> list[PaperMetadata]:
-        search_url = f"{self.BASE_URL}?search_query={query}&sortBy=relevance&sortOrder=descending&start=0&max_results={self.top_k}"
+        search_url = (
+            f"{self.BASE_URL}?search_query={query}&sortBy=relevance"
+            f"&sortOrder=descending&start=0&max_results={self.top_k}"
+        )
 
         for attempt in range(API_MAX_RETRIES):
             try:
@@ -180,7 +181,10 @@ class OpenAlexRetriever:
             "search": query,
             "per-page": self.top_k,
             "mailto": self.email,
-            "select": "id,doi,title,publication_year,authorships,abstract_inverted_index,cited_by_count",
+            "select": (
+                "id,doi,title,publication_year,authorships,"
+                "abstract_inverted_index,cited_by_count"
+            ),
         }
 
         for attempt in range(API_MAX_RETRIES):
@@ -444,7 +448,6 @@ class ResearcherNode:
 
         all_papers.sort(key=lambda x: x.relevance_score, reverse=True)
 
-        # Compress: strip full abstracts from state, build compact summaries for LLM context
         stripped_papers, paper_summaries = _compress_papers(all_papers)
 
         logger.info(

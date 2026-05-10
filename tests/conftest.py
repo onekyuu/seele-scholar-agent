@@ -202,6 +202,62 @@ CITATION_ALIGNMENT_USER_PROMPT = """请检查以下章节中的引用是否与�
 
 如所有引用均准确，issues 返回空数组。"""
 
+TERMINOLOGY_CHECK_SYSTEM_PROMPT = (
+    "You are an academic writing expert specializing in terminology consistency. "
+    "Analyze the provided section summaries and identify terminology inconsistencies: "
+    "the same concept referred to by different names, abbreviations used inconsistently, "
+    "or contradictory definitions of the same term. "
+    "Respond ONLY with valid JSON."
+)
+
+TERMINOLOGY_CHECK_USER_PROMPT = """Topic: {topic}
+Keywords: {keywords}
+
+Section summaries:
+{sections_summary}
+
+Return a JSON object with key "issues" — a list of terminology consistency issues.
+Each issue: {{"issue_type": "terminology", "description": "...", "sections_involved": ["..."], "suggestion": "..."}}
+If no issues found, return {{"issues": []}}"""
+
+LOGIC_CHECK_SYSTEM_PROMPT = (
+    "You are an academic writing expert specializing in logical coherence. "
+    "Analyze the provided outline and section summaries for logical issues: "
+    "unsupported conclusions, missing logical transitions, contradictions between sections, "
+    "or arguments that do not support the paper's thesis. "
+    "Respond ONLY with valid JSON."
+)
+
+LOGIC_CHECK_USER_PROMPT = """Topic: {topic}
+Outline structure:
+{outline_text}
+
+Section summaries:
+{sections_summary}
+
+Return a JSON object with key "issues" — a list of logical coherence issues.
+Each issue: {{"issue_type": "logic", "description": "...", "sections_involved": ["..."], "suggestion": "..."}}
+If no issues found, return {{"issues": []}}"""
+
+REFERENCE_CONSISTENCY_SYSTEM_PROMPT = (
+    "You are an academic writing expert specializing in citation consistency. "
+    "Analyze the provided reference list and section summaries for citation issues: "
+    "citations referencing non-existent entries, inconsistent numbering, "
+    "or important claims that lack supporting citations. "
+    "Respond ONLY with valid JSON."
+)
+
+REFERENCE_CONSISTENCY_USER_PROMPT = """Topic: {topic}
+Reference list:
+{references_text}
+
+Section summaries (with inline citations):
+{sections_summary}
+
+Return a JSON object with key "issues" — a list of citation consistency issues.
+Each issue: {{"issue_type": "citation", "description": "...", "sections_involved": ["..."], "suggestion": "..."}}
+If no issues found, return {{"issues": []}}"""
+
 TOPIC_TRANSLATION_SYSTEM_PROMPT = """You are an academic search query expert. Your task is to translate a non-English research topic into English academic search queries."""
 
 TOPIC_TRANSLATION_USER_PROMPT = """Translate the following research topic into English academic search queries.
@@ -236,6 +292,12 @@ def mock_prompts() -> PromptsConfig:
         citation_alignment_user_prompt=CITATION_ALIGNMENT_USER_PROMPT,
         topic_translation_system_prompt=TOPIC_TRANSLATION_SYSTEM_PROMPT,
         topic_translation_user_prompt=TOPIC_TRANSLATION_USER_PROMPT,
+        terminology_check_system_prompt=TERMINOLOGY_CHECK_SYSTEM_PROMPT,
+        terminology_check_user_prompt=TERMINOLOGY_CHECK_USER_PROMPT,
+        logic_check_system_prompt=LOGIC_CHECK_SYSTEM_PROMPT,
+        logic_check_user_prompt=LOGIC_CHECK_USER_PROMPT,
+        reference_consistency_system_prompt=REFERENCE_CONSISTENCY_SYSTEM_PROMPT,
+        reference_consistency_user_prompt=REFERENCE_CONSISTENCY_USER_PROMPT,
     )
 
 

@@ -1,14 +1,13 @@
 """Integration tests for create_simple_writing_graph — G-01 through G-06."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 import respx
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
-
 from seele_scholar_agent.graph import create_simple_writing_graph
 
 
@@ -222,6 +221,9 @@ async def test_graph_multiple_sections_all_completed(base_state, mock_prompts):
                 AIMessage(content=_reviewer_response(approved=True)),
                 AIMessage(content="Conclusion content."),
                 AIMessage(content=_reviewer_response(approved=True)),
+                AIMessage(content=json.dumps({"issues": []})),
+                AIMessage(content=json.dumps({"issues": []})),
+                AIMessage(content=json.dumps({"issues": []})),
             ]
         )
 

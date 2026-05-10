@@ -23,18 +23,14 @@ class PromptsConfig(BaseModel):
     topic_translation_system_prompt: str
     topic_translation_user_prompt: str
 
-    # ── ConsistencyCheckerNode Map-Reduce 子检查的可选 prompts ──────────────
-    # 若留空字符串，节点将使用内置默认模板，无需主项目更新即可获得优化效果
-    terminology_check_system_prompt: str = ""
-    terminology_check_user_prompt: str = ""
-    logic_check_system_prompt: str = ""
-    logic_check_user_prompt: str = ""
-    reference_consistency_system_prompt: str = ""
-    reference_consistency_user_prompt: str = ""
+    terminology_check_system_prompt: str
+    terminology_check_user_prompt: str
+    logic_check_system_prompt: str
+    logic_check_user_prompt: str
+    reference_consistency_system_prompt: str
+    reference_consistency_user_prompt: str
 
 
-# Inject document chunks into WriterNode for writing context (figures, data)
 RAGRetrieverFunc = Callable[[str], Awaitable[list[DocumentChunk]]]
 
-# Inject additional paper metadata sources into ResearcherNode (e.g. PubMed, IEEE, user library)
 PaperSearchFunc = Callable[[str], Awaitable[list[PaperMetadata]]]

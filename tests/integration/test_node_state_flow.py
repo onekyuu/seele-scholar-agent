@@ -298,7 +298,7 @@ async def test_writer_reviewer_finalizer_chain(mock_llm, mock_prompts, state_wit
 
 
 # ---------------------------------------------------------------------------
-# I-08: finalizer → consistency_checker — issues written to state
+# I-08: finalizer output can feed consistency_checker — issues written to state
 # ---------------------------------------------------------------------------
 
 
@@ -358,12 +358,12 @@ async def test_finalizer_output_feeds_consistency_checker(mock_llm, mock_prompts
 
 
 # ---------------------------------------------------------------------------
-# I-09: consistency_checker → reference_generator — references written to state
+# I-09: reference_generator → consistency_checker — reference list is available to checks
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_consistency_checker_output_feeds_reference_generator(
+async def test_reference_generator_output_feeds_consistency_checker(
     mock_llm, mock_prompts, base_state, sample_papers
 ):
     sections = [
@@ -387,20 +387,30 @@ async def test_consistency_checker_output_feeds_reference_generator(
     state = cast(AgentState, {**base_state, "papers": sample_papers, "sections": sections})
 
     with patch(
-        "seele_scholar_agent.nodes.consistency_checker.invoke_with_retry",
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
         new_callable=AsyncMock,
-        return_value={"issues": []},
+        return_value=None,
+    ):
+        ref_gen = ReferenceGeneratorNode()
+        ref_result = await ref_gen.generate(state)
+
+    checker_state = cast(AgentState, {**state, **ref_result})
+    captured_inputs: list[dict] = []
+
+    async def capture_consistency_input(_chain, input_data, **_kwargs):
+        captured_inputs.append(input_data)
+        return {"issues": []}
+
+    with patch(
+        "seele_scholar_agent.nodes.consistency_checker.invoke_with_retry",
+        side_effect=capture_consistency_input,
     ):
         checker = ConsistencyCheckerNode(llm=mock_llm, prompts=mock_prompts)
-        check_result = await checker.check(state)
+        check_result = await checker.check(checker_state)
 
-    ref_gen_state = cast(AgentState, {**state, **check_result})
-
-    ref_gen = ReferenceGeneratorNode()
-    ref_result = await ref_gen.generate(ref_gen_state)
-
-    assert ref_result["status"] == "completed"
-    refs = ref_result["references"]
+    refs = checker_state["references"]
     numbers = {r.number for r in refs}
     assert 1 in numbers
     assert 2 in numbers
+    assert check_result["consistency_checked"] is True
+    assert any("[1]" in data.get("references_text", "") for data in captured_inputs)

@@ -25,21 +25,11 @@ PAPER_SUMMARY_ABSTRACT_CHARS = 300
 CITATION_PATTERN = re.compile(r"\[(\d+)\]")
 
 
-# ---------------------------------------------------------------------------
-# Streaming event model
-# ---------------------------------------------------------------------------
-
-
 class NodeStreamEvent(TypedDict, total=False):
     type: Literal["token", "progress", "result"]
     token: str
     progress: str
     result: dict[str, Any]
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 async def _stream_llm_text(

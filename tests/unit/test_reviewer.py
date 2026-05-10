@@ -5,7 +5,6 @@ from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from seele_scholar_agent.nodes.reviewer import ReviewerNode
 from seele_scholar_agent.state import AgentState, PaperMetadata, SectionDraft
 
@@ -26,7 +25,7 @@ def _make_state_with_written_section(
     )
 
 
-def _written_section(title="Introduction", content="Some content.", index=0):
+def _written_section(title="Introduction", content="Some content.", index=0, revision_count=0):
     return SectionDraft(
         section_id=f"section_{index}",
         title=title,
@@ -34,6 +33,7 @@ def _written_section(title="Introduction", content="Some content.", index=0):
         order_index=index + 1,
         content=content,
         status="review",
+        revision_count=revision_count,
     )
 
 
@@ -118,6 +118,7 @@ async def test_reviewer_rejected_appends_comments_and_increments_revision(
     assert result["revision_count"] == 1
     assert result["status"] == "writing"
     updated_section = result["sections"][0]
+    assert updated_section.revision_count == 1
     assert len(updated_section.review_comments) > 0
 
 
@@ -128,10 +129,8 @@ async def test_reviewer_rejected_appends_comments_and_increments_revision(
 
 @pytest.mark.asyncio
 async def test_reviewer_max_revisions_forces_approval(mock_llm, mock_prompts, base_state):
-    sections = [_written_section("Introduction", index=0)]
-    state = _make_state_with_written_section(
-        base_state, sections, index=0, revision_count=3, max_revisions=3
-    )
+    sections = [_written_section("Introduction", index=0, revision_count=3)]
+    state = _make_state_with_written_section(base_state, sections, index=0, max_revisions=3)
 
     review_result = {
         "approved": False,
@@ -165,12 +164,10 @@ async def test_reviewer_max_revisions_forces_approval_not_last_section(
     must advance to next section and continue writing (not mark as completed).
     """
     sections = [
-        _written_section("Introduction", index=0),
+        _written_section("Introduction", index=0, revision_count=2),
         _written_section("Related Work", index=1),
     ]
-    state = _make_state_with_written_section(
-        base_state, sections, index=0, revision_count=2, max_revisions=2
-    )
+    state = _make_state_with_written_section(base_state, sections, index=0, max_revisions=2)
 
     review_result = {
         "approved": False,
@@ -194,6 +191,44 @@ async def test_reviewer_max_revisions_forces_approval_not_last_section(
     assert result["current_section_index"] == 1
     # Section added to completed list
     assert "Introduction" in result["sections_completed"]
+
+
+# ---------------------------------------------------------------------------
+# RV-04c: max_revisions is evaluated per section, not from global revision_count
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reviewer_max_revisions_uses_section_revision_count(
+    mock_llm, mock_prompts, base_state
+):
+    sections = [_written_section("Related Work", index=1, revision_count=0)]
+    state = _make_state_with_written_section(
+        base_state,
+        sections,
+        index=0,
+        revision_count=10,
+        max_revisions=2,
+    )
+
+    review_result = {
+        "approved": False,
+        "score": 4,
+        "issues": [{"type": "weak_argument", "description": "Weak.", "suggestion": "Add more."}],
+        "summary": "Needs work.",
+    }
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=review_result,
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "writing"
+    assert result["sections"][0].status == "writing"
+    assert result["sections"][0].revision_count == 1
+    assert result["revision_count"] == 11
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +286,7 @@ async def test_reviewer_llm_exception_fallback(mock_llm, mock_prompts, base_stat
 
     assert result["status"] == "writing"
     assert result["revision_count"] == 1
+    assert result["sections"][0].revision_count == 1
 
 
 # ---------------------------------------------------------------------------

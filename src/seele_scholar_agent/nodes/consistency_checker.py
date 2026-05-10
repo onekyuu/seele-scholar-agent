@@ -15,68 +15,6 @@ logger = get_logger(__name__)
 
 _SUMMARY_MAX_CHARS = 600
 
-# ── Built-in default prompts for map-reduce sub-checks ──────────────────────
-# These are used when the corresponding PromptsConfig fields are left empty.
-
-_TERMINOLOGY_SYSTEM_DEFAULT = (
-    "You are an academic writing expert specializing in terminology consistency. "
-    "Analyze the provided section summaries and identify terminology inconsistencies: "
-    "the same concept referred to by different names, abbreviations used inconsistently, "
-    "or contradictory definitions of the same term. "
-    "Respond ONLY with valid JSON."
-)
-
-_TERMINOLOGY_USER_DEFAULT = """\
-Topic: {topic}
-Keywords: {keywords}
-
-Section summaries:
-{sections_summary}
-
-Return a JSON object with key "issues" — a list of terminology consistency issues.
-Each issue: {{"issue_type": "terminology", "description": "...", "sections_involved": ["..."], "suggestion": "..."}}
-If no issues found, return {{"issues": []}}"""
-
-_LOGIC_SYSTEM_DEFAULT = (
-    "You are an academic writing expert specializing in logical coherence. "
-    "Analyze the provided outline and section summaries for logical issues: "
-    "unsupported conclusions, missing logical transitions, contradictions between sections, "
-    "or arguments that do not support the paper's thesis. "
-    "Respond ONLY with valid JSON."
-)
-
-_LOGIC_USER_DEFAULT = """\
-Topic: {topic}
-Outline structure:
-{outline_text}
-
-Section summaries:
-{sections_summary}
-
-Return a JSON object with key "issues" — a list of logical coherence issues.
-Each issue: {{"issue_type": "logic", "description": "...", "sections_involved": ["..."], "suggestion": "..."}}
-If no issues found, return {{"issues": []}}"""
-
-_CITATION_SYSTEM_DEFAULT = (
-    "You are an academic writing expert specializing in citation consistency. "
-    "Analyze the provided reference list and section summaries for citation issues: "
-    "citations referencing non-existent entries, inconsistent numbering, "
-    "or important claims that lack supporting citations. "
-    "Respond ONLY with valid JSON."
-)
-
-_CITATION_USER_DEFAULT = """\
-Topic: {topic}
-Reference list:
-{references_text}
-
-Section summaries (with inline citations):
-{sections_summary}
-
-Return a JSON object with key "issues" — a list of citation consistency issues.
-Each issue: {{"issue_type": "citation", "description": "...", "sections_involved": ["..."], "suggestion": "..."}}
-If no issues found, return {{"issues": []}}"""
-
 
 def _build_sections_summary_from_state(
     sections: list[SectionDraft],
@@ -91,7 +29,6 @@ def _build_sections_summary_from_state(
     for i, section in enumerate(sections):
         if section.status not in ("approved", "auto_generated"):
             continue
-        # Prefer pre-generated summary
         if i < len(section_summaries) and section_summaries[i]:
             parts.append(section_summaries[i])
         elif section.content:
@@ -108,8 +45,6 @@ class ConsistencyCheckerNode:
         self.prompts = prompts
         self.parser = JsonOutputParser()
 
-    # ── Public entry points ──────────────────────────────────────────────────
-
     async def check(self, state: AgentState) -> dict[str, Any]:
         sections = state.get("sections", [])
         approved = [s for s in sections if s.status in ("approved", "auto_generated")]
@@ -125,7 +60,6 @@ class ConsistencyCheckerNode:
         references = state.get("references", [])
         topic = state["topic"]
 
-        # Run 3 independent checks in parallel — each receives only the context it needs
         results = await asyncio.gather(
             self._check_terminology(topic, outline, sections_summary),
             self._check_logic(topic, outline, sections_summary),
@@ -159,11 +93,8 @@ class ConsistencyCheckerNode:
         yield NodeStreamEvent(type="progress", progress="checking_logic")
         yield NodeStreamEvent(type="progress", progress="checking_citations")
 
-        # All 3 sub-checks run in parallel inside check()
         result = await self.check(state)
         yield NodeStreamEvent(type="result", result=result)
-
-    # ── Internal helpers ────────────────────────────────────────────────────
 
     def _build_outline_context(self, outline: Any) -> str:
         if not outline:
@@ -222,12 +153,10 @@ class ConsistencyCheckerNode:
         self, topic: str, outline: Any, sections_summary: str
     ) -> list[ConsistencyIssue]:
         """Terminology consistency: only needs keywords + section summaries."""
-        sys_prompt = self.prompts.terminology_check_system_prompt or _TERMINOLOGY_SYSTEM_DEFAULT
-        user_prompt = self.prompts.terminology_check_user_prompt or _TERMINOLOGY_USER_DEFAULT
         keywords = ", ".join(getattr(outline, "keywords", [])) if outline else ""
         return await self._run_sub_check(
-            sys_prompt,
-            user_prompt,
+            self.prompts.terminology_check_system_prompt,
+            self.prompts.terminology_check_user_prompt,
             {"topic": topic, "keywords": keywords, "sections_summary": sections_summary},
             "terminology",
         )
@@ -236,12 +165,10 @@ class ConsistencyCheckerNode:
         self, topic: str, outline: Any, sections_summary: str
     ) -> list[ConsistencyIssue]:
         """Logic coherence: needs outline structure + section summaries."""
-        sys_prompt = self.prompts.logic_check_system_prompt or _LOGIC_SYSTEM_DEFAULT
-        user_prompt = self.prompts.logic_check_user_prompt or _LOGIC_USER_DEFAULT
         outline_text = self._build_outline_context(outline)
         return await self._run_sub_check(
-            sys_prompt,
-            user_prompt,
+            self.prompts.logic_check_system_prompt,
+            self.prompts.logic_check_user_prompt,
             {"topic": topic, "outline_text": outline_text, "sections_summary": sections_summary},
             "logic",
         )
@@ -250,12 +177,10 @@ class ConsistencyCheckerNode:
         self, topic: str, references: list[Any], sections_summary: str
     ) -> list[ConsistencyIssue]:
         """Citation consistency: only needs reference list + section summaries."""
-        sys_prompt = self.prompts.reference_consistency_system_prompt or _CITATION_SYSTEM_DEFAULT
-        user_prompt = self.prompts.reference_consistency_user_prompt or _CITATION_USER_DEFAULT
         references_text = self._build_references_context(references)
         return await self._run_sub_check(
-            sys_prompt,
-            user_prompt,
+            self.prompts.reference_consistency_system_prompt,
+            self.prompts.reference_consistency_user_prompt,
             {
                 "topic": topic,
                 "references_text": references_text,

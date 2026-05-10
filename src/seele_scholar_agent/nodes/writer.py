@@ -97,13 +97,11 @@ class WriterNode:
         outline_json = self._build_outline_json(state.get("outline"))
         review_comments = self._build_review_comments(section)
 
-        # Use pre-generated section summaries (cheaper than full content)
         section_summaries: list[str] = list(state.get("section_summaries") or [])
         previous_sections = self._build_previous_sections_context(
             sections, current_index, section_summaries
         )
 
-        # Use pre-built paper summaries from Researcher (cheaper than full abstract list)
         paper_summaries: list[str] = state.get("paper_summaries") or []
         numbered_papers = (
             self._build_numbered_papers_from_summaries(paper_summaries)
@@ -151,8 +149,6 @@ class WriterNode:
             }
         )
 
-        # Update section_summaries: overwrite the slot for this section index
-        # (handles both first write and revisions correctly)
         updated_summaries = list(state.get("section_summaries") or [])
         while len(updated_summaries) <= current_index:
             updated_summaries.append("")
@@ -233,7 +229,6 @@ class WriterNode:
             }
         )
 
-        # Update section_summaries
         _updated_summaries = list(state.get("section_summaries") or [])
         while len(_updated_summaries) <= current_index:
             _updated_summaries.append("")

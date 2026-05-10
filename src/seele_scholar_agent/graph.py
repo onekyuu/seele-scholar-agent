@@ -72,9 +72,9 @@ def create_writing_graph(
     graph.add_conditional_edges(
         "reviewer", route_reviewer, {"writer": "writer", "finalizer": "finalizer"}
     )
-    graph.add_edge("finalizer", "consistency_checker")
-    graph.add_edge("consistency_checker", "reference_generator")
-    graph.add_edge("reference_generator", END)
+    graph.add_edge("finalizer", "reference_generator")
+    graph.add_edge("reference_generator", "consistency_checker")
+    graph.add_edge("consistency_checker", END)
 
     return graph.compile(checkpointer=MemorySaver(), interrupt_after=["topic_proposer", "planner"])
 
@@ -129,8 +129,8 @@ def create_simple_writing_graph(
     graph.add_conditional_edges(
         "reviewer", should_continue, {"writer": "writer", "finalizer": "finalizer"}
     )
-    graph.add_edge("finalizer", "consistency_checker")
-    graph.add_edge("consistency_checker", "reference_generator")
-    graph.add_edge("reference_generator", END)
+    graph.add_edge("finalizer", "reference_generator")
+    graph.add_edge("reference_generator", "consistency_checker")
+    graph.add_edge("consistency_checker", END)
 
     return graph.compile(checkpointer=MemorySaver())

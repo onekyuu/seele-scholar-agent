@@ -208,8 +208,14 @@ class ReviewerNode:
                 issues.append(
                     ReviewIssue(
                         type="missing_citation",
-                        description=f"Citation [{num}] does not correspond to any paper in the reference list (total: {total_papers})",
-                        suggestion=f"Remove [{num}] or replace with a valid citation [1]-[{total_papers}]",
+                        description=(
+                            f"Citation [{num}] does not correspond to any paper in the "
+                            f"reference list (total: {total_papers})"
+                        ),
+                        suggestion=(
+                            f"Remove [{num}] or replace with a valid citation "
+                            f"[1]-[{total_papers}]"
+                        ),
                     )
                 )
         return issues
@@ -280,11 +286,12 @@ class ReviewerNode:
     ) -> dict[str, Any]:
         sections = state["sections"]
         index = state["current_section_index"]
-        revision_count = state.get("revision_count", 0)
+        total_revision_count = state.get("revision_count", 0)
+        section_revision_count = section.revision_count
         max_revisions = state.get("max_revisions", settings.MAX_REVISIONS)
         lang = state.get("language", "zh")
 
-        if revision_count >= max_revisions:
+        if section_revision_count >= max_revisions:
             logger.warning("max revisions reached, forcing approval")
             updated = sections.copy()
             updated[index] = section.model_copy(update={"status": "approved"})
@@ -310,8 +317,9 @@ class ReviewerNode:
                 "status": "writing",
             }
 
+        next_section_revision_count = section_revision_count + 1
         comments = [
-            t(lang, "review_round", round=section.revision_count, score=review.score),
+            t(lang, "review_round", round=next_section_revision_count, score=review.score),
             t(lang, "review_opinion", summary=review.summary),
         ]
         for i, issue in enumerate(review.issues, 1):
@@ -322,13 +330,17 @@ class ReviewerNode:
 
         updated = sections.copy()
         updated[index] = section.model_copy(
-            update={"status": "writing", "review_comments": comments}
+            update={
+                "status": "writing",
+                "revision_count": next_section_revision_count,
+                "review_comments": comments,
+            }
         )
 
         return {
             "sections": updated,
             "review_history": [record],
             "current_review": review.model_dump(),
-            "revision_count": revision_count + 1,
+            "revision_count": total_revision_count + 1,
             "status": "writing",
         }
