@@ -1,10 +1,11 @@
 import logging
 import sys
+from typing import cast
 
 import structlog
 
 
-def setup_logging(debug: bool = False):
+def setup_logging(debug: bool = False) -> None:
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
@@ -29,5 +30,5 @@ def setup_logging(debug: bool = False):
     )
 
 
-def get_logger(name: str):
-    return structlog.get_logger(name)
+def get_logger(name: str) -> structlog.stdlib.BoundLogger:
+    return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))

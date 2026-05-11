@@ -12,7 +12,7 @@ from .nodes.topic_proposer import TopicProposerNode
 from .nodes.writer import WriterNode
 from .state import AgentState, OutlineStructure, PaperMetadata, SectionDraft
 
-__version__ = "0.11.0"
+__version__ = "0.11.1"
 
 __all__ = [
     "create_writing_graph",

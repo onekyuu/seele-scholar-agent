@@ -26,7 +26,7 @@ def create_writing_graph(
     semantic_scholar_key: str | None = None,
     openalex_email: str | None = None,
     extra_paper_retrievers: list[PaperSearchFunc] | None = None,
-) -> CompiledStateGraph:
+) -> CompiledStateGraph[AgentState, None, AgentState, AgentState]:
     topic_proposer = TopicProposerNode(llm=model, prompts=prompts)
     researcher = ResearcherNode(
         llm=model,
@@ -42,7 +42,7 @@ def create_writing_graph(
     consistency_checker = ConsistencyCheckerNode(llm=model, prompts=prompts)
     reference_generator = ReferenceGeneratorNode()
 
-    graph = StateGraph(AgentState)
+    graph = StateGraph[AgentState, None, AgentState, AgentState](AgentState)
 
     graph.add_node("topic_proposer", topic_proposer.propose)
     graph.add_node("researcher", researcher.search)
@@ -86,7 +86,7 @@ def create_simple_writing_graph(
     semantic_scholar_key: str | None = None,
     openalex_email: str | None = None,
     extra_paper_retrievers: list[PaperSearchFunc] | None = None,
-) -> CompiledStateGraph:
+) -> CompiledStateGraph[AgentState, None, AgentState, AgentState]:
     topic_proposer = TopicProposerNode(llm=model, prompts=prompts)
     researcher = ResearcherNode(
         llm=model,
@@ -102,7 +102,7 @@ def create_simple_writing_graph(
     consistency_checker = ConsistencyCheckerNode(llm=model, prompts=prompts)
     reference_generator = ReferenceGeneratorNode()
 
-    graph = StateGraph(AgentState)
+    graph = StateGraph[AgentState, None, AgentState, AgentState](AgentState)
 
     graph.add_node("proposer", topic_proposer.propose)
     graph.add_node("researcher", researcher.search)

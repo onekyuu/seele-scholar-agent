@@ -170,14 +170,16 @@ class OpenAlexRetriever:
         return " ".join(words).strip()
 
     def _calculate_relevance(self, paper: dict[str, Any]) -> float:
-        citation_count = paper.get("cited_by_count", 0)
-        year = paper.get("publication_year", 2020)
+        raw_citation_count = paper.get("cited_by_count", 0)
+        raw_year = paper.get("publication_year", 2020)
+        citation_count = raw_citation_count if isinstance(raw_citation_count, int | float) else 0
+        year = raw_year if isinstance(raw_year, int) else 2020
         citation_score = min(citation_count / 1000, 1.0)
         year_weight = 1.0 if year >= 2020 else 0.6
         return round(citation_score * 0.7 + year_weight * 0.3, 2)
 
     async def search(self, query: str) -> list[PaperMetadata]:
-        params = {
+        params: dict[str, str | int] = {
             "search": query,
             "per-page": self.top_k,
             "mailto": self.email,
@@ -275,7 +277,11 @@ class SemanticScholarRetriever:
             ]
 
         url = f"{self.BASE_URL}/paper/search"
-        params = {"query": query, "limit": self.top_k, "fields": ",".join(fields)}
+        params: dict[str, str | int] = {
+            "query": query,
+            "limit": self.top_k,
+            "fields": ",".join(fields),
+        }
 
         for attempt in range(API_MAX_RETRIES):
             try:
@@ -332,8 +338,10 @@ class SemanticScholarRetriever:
         return []
 
     def _calculate_relevance(self, paper: dict[str, Any]) -> float:
-        citation_count = paper.get("citationCount", 0)
-        year = paper.get("year", 2020)
+        raw_citation_count = paper.get("citationCount", 0)
+        raw_year = paper.get("year", 2020)
+        citation_count = raw_citation_count if isinstance(raw_citation_count, int | float) else 0
+        year = raw_year if isinstance(raw_year, int) else 2020
         citation_score = min(citation_count / 1000, 1.0)
         year_weight = 1.0 if year >= 2020 else 0.6
         return round(citation_score * 0.7 + year_weight * 0.3, 2)
@@ -342,7 +350,7 @@ class SemanticScholarRetriever:
 class ResearcherNode:
     def __init__(
         self,
-        llm: BaseLanguageModel | None = None,
+        llm: BaseLanguageModel[Any] | None = None,
         prompts: PromptsConfig | None = None,
         semantic_scholar_key: str | None = None,
         openalex_email: str | None = None,
