@@ -33,7 +33,7 @@ class NodeStreamEvent(TypedDict, total=False):
 
 
 async def _stream_llm_text(
-    chain: Runnable,
+    chain: Runnable[dict[str, Any], Any],
     input_data: dict[str, Any],
     *,
     max_retries: int = LLM_MAX_RETRIES,
@@ -65,7 +65,7 @@ async def _stream_llm_text(
 
 
 async def invoke_with_retry(
-    chain: Runnable,
+    chain: Runnable[dict[str, Any], Any],
     input_data: dict[str, Any],
     *,
     max_retries: int = LLM_MAX_RETRIES,

@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
@@ -56,7 +57,7 @@ def _parse_bibtex_field(bibtex: str, field: str) -> str | None:
     return None
 
 
-def _parse_crossref_json(data: dict) -> CrossRefMetadata:
+def _parse_crossref_json(data: dict[str, Any]) -> CrossRefMetadata:
     doi = data.get("DOI", "")
 
     year: int | None = None
@@ -74,7 +75,7 @@ def _parse_crossref_json(data: dict) -> CrossRefMetadata:
     if not venue:
         venue = data.get("publisher")
 
-    raw_authors: list[dict] = data.get("author", [])
+    raw_authors: list[dict[str, Any]] = data.get("author", [])
     authors: list[str] = []
     for a in raw_authors:
         given = a.get("given", "")
