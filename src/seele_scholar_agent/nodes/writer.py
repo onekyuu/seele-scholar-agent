@@ -256,9 +256,32 @@ class WriterNode:
     def _build_outline_json(self, outline: Any) -> str:
         if not outline:
             return ""
-        lines = [f"Title: {outline.title}", ""]
+        lines = [
+            f"Title: {outline.title}",
+            f"Paper type: {getattr(outline, 'paper_type', 'auto')}",
+            f"Structure pattern: {getattr(outline, 'structure_pattern', 'auto')}",
+            "",
+        ]
         for s in outline.sections:
             lines.append(f"- {s.title}: {s.description}")
+            purpose = getattr(s, "purpose", "")
+            if purpose:
+                lines.append(f"  Purpose: {purpose}")
+            content_summary = getattr(s, "content_summary", "")
+            if content_summary:
+                lines.append(f"  Content summary: {content_summary}")
+            target_claims = getattr(s, "target_claims", [])
+            if target_claims:
+                lines.append(f"  Target claims: {'; '.join(target_claims)}")
+            key_sources = getattr(s, "key_sources", [])
+            if key_sources:
+                lines.append(f"  Key sources: {'; '.join(key_sources)}")
+            evidence_gaps = getattr(s, "evidence_gaps", [])
+            if evidence_gaps:
+                lines.append(f"  Evidence gaps: {'; '.join(evidence_gaps)}")
+            transition = getattr(s, "transition_to_next", "")
+            if transition:
+                lines.append(f"  Transition: {transition}")
         return "\n".join(lines)
 
     def _build_rag_context(self, rag_context: Any) -> str:

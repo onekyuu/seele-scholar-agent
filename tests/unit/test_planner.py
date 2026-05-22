@@ -4,10 +4,8 @@ from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from seele_scholar_agent.nodes.planner import PlannerNode
 from seele_scholar_agent.state import AgentState, PaperMetadata
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -409,3 +407,157 @@ async def test_planner_default_outline_has_empty_suggested_figures(
 
     for section in result["outline"].sections:
         assert section.suggested_figures == []
+
+
+# ---------------------------------------------------------------------------
+# P-15: Planner preserves paper type, structure pattern, and section planning fields
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_preserves_structure_and_section_strategy(
+    mock_llm, mock_prompts, state_with_papers
+):
+    """P-15: Rich outline fields are parsed into OutlineStructure and SectionOutline."""
+    result_data = _make_llm_result(
+        sections=[
+            {
+                "title": "Thematic Foundations",
+                "description": "Define the main research themes.",
+                "order": 1,
+                "purpose": "Establish the conceptual frame for the review.",
+                "content_summary": (
+                    "This section defines the core LLM concepts and explains why "
+                    "they matter for the survey."
+                ),
+                "target_words": "850",
+                "key_points": ["motivation"],
+                "target_claims": ["LLM evaluation requires both capability and risk dimensions."],
+                "key_sources": ["[1] Attention Is All You Need"],
+                "citation_plan": ["Use [1] to ground Transformer architecture."],
+                "evidence_gaps": ["Need a recent evaluation survey."],
+                "transition_to_next": "Moves from definitions to prior evaluation frameworks.",
+            }
+        ],
+    )
+    result_data.update(
+        {
+            "paper_type": "literature_review",
+            "structure_pattern": "thematic_review",
+            "rationale": (
+                "The topic is better handled as a thematic synthesis than as an "
+                "experiment."
+            ),
+        }
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=result_data,
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(
+            cast(
+                AgentState,
+                {
+                    **state_with_papers,
+                    "paper_type": "literature_review",
+                    "structure_pattern": "thematic_review",
+                },
+            )
+        )
+
+    outline = result["outline"]
+    section = outline.sections[0]
+    assert outline.paper_type == "literature_review"
+    assert outline.structure_pattern == "thematic_review"
+    assert outline.rationale.startswith("The topic")
+    assert section.purpose == "Establish the conceptual frame for the review."
+    assert section.content_summary.startswith("This section defines")
+    assert section.target_words == 850
+    assert section.target_claims == [
+        "LLM evaluation requires both capability and risk dimensions."
+    ]
+    assert section.key_sources == ["[1] Attention Is All You Need"]
+    assert section.evidence_gaps == ["Need a recent evaluation survey."]
+    assert section.transition_to_next.startswith("Moves from")
+
+
+# ---------------------------------------------------------------------------
+# P-16: Section strategy fields are mirrored into evidence_map by default
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_builds_evidence_map_from_section_fields(
+    mock_llm, mock_prompts, state_with_papers
+):
+    """P-16: evidence_map is derived from section-level evidence planning."""
+    result_data = _make_llm_result(
+        sections=[
+            {
+                "title": "Related Work",
+                "description": "Prior evaluation work.",
+                "order": 1,
+                "key_points": [],
+                "target_claims": ["Existing benchmarks under-cover multilingual safety."],
+                "key_sources": ["[2] BERT"],
+                "citation_plan": ["Use [2] as a representative pretraining baseline."],
+                "evidence_gaps": ["Need multilingual benchmark sources."],
+            }
+        ]
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=result_data,
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state_with_papers)
+
+    evidence_plan = result["outline"].evidence_map[0]
+    assert evidence_plan.section_title == "Related Work"
+    assert evidence_plan.target_claims == [
+        "Existing benchmarks under-cover multilingual safety."
+    ]
+    assert evidence_plan.key_sources == ["[2] BERT"]
+    assert evidence_plan.evidence_gaps == ["Need multilingual benchmark sources."]
+
+
+# ---------------------------------------------------------------------------
+# P-17: Planner input uses paper_summaries and requested structure controls
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_planner_prompt_uses_paper_summaries_and_structure_controls(
+    mock_llm, mock_prompts, state_with_papers
+):
+    """P-17: Planner receives richer literature summaries and structure hints."""
+    captured_input: dict = {}
+
+    async def capture_invoke(chain, input_data):  # type: ignore[override]
+        captured_input.update(input_data)
+        return _make_llm_result()
+
+    state = cast(
+        AgentState,
+        {
+            **state_with_papers,
+            "paper_summaries": ["[1] Compact summary with key contribution."],
+            "paper_type": "theoretical",
+            "structure_pattern": "theoretical_analysis",
+            "target_word_count": 6000,
+        },
+    )
+
+    with patch("seele_scholar_agent.nodes.planner.invoke_with_retry", side_effect=capture_invoke):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        await node.plan(state)
+
+    assert captured_input["papers_summary"] == "[1] Compact summary with key contribution."
+    assert captured_input["paper_type"] == "theoretical"
+    assert captured_input["structure_pattern"] == "theoretical_analysis"
+    assert captured_input["target_word_count"] == "6000"

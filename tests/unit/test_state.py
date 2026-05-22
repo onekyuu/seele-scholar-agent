@@ -1,6 +1,5 @@
 import pytest
 from pydantic import ValidationError
-
 from seele_scholar_agent.state import (
     OutlineStructure,
     PaperMetadata,
@@ -65,6 +64,9 @@ def test_outline_structure_defaults():
     outline = OutlineStructure(title="T", abstract="A")
     assert outline.sections == []
     assert outline.keywords == []
+    assert outline.paper_type == "auto"
+    assert outline.structure_pattern == "auto"
+    assert outline.evidence_map == []
 
 
 def test_agent_state_annotated_add(base_state, sample_papers):
@@ -86,3 +88,9 @@ def test_section_outline_key_points_default():
     s = SectionOutline(title="Intro", order=1)
     assert s.key_points == []
     assert s.description == ""
+    assert s.purpose == ""
+    assert s.content_summary == ""
+    assert s.transition_to_next == ""
+    assert s.target_claims == []
+    assert s.key_sources == []
+    assert s.evidence_gaps == []

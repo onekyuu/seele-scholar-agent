@@ -1,12 +1,13 @@
 """Global fixtures for all tests."""
 
+# ruff: noqa: E501
+
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
-
 from seele_scholar_agent.agent_config import PromptsConfig
 from seele_scholar_agent.state import (
     AgentState,
@@ -17,16 +18,20 @@ from seele_scholar_agent.state import (
 )
 
 # --- Inlined prompt constants (formerly nodes/prompts.py) ---
-PLANNER_SYSTEM_PROMPT = """你是一位资深的学术论文大纲规划师。根据给定的研究主题和检索到的相关文献，生成一份{language}的{language_title}大纲。
+PLANNER_SYSTEM_PROMPT = """你是一位资深的学术论文结构架构师。根据研究主题、论文类型、目标结构和检索到的相关文献，生成一份{language}的{language_title}大纲。
 
 要求：
-1. 遵循标准学术论文结构 (Introduction -> Related Work -> Method -> Experiment -> Conclusion)
-2. 章节数量适中 (6-10个主要章节)，每个章节有明确的描述
-3. 适当引用检索到的文献
+1. 先根据 paper_type 和 structure_pattern 选择合适结构，不要把所有论文都套成实验论文
+2. 章节数量适中，每个章节必须有 purpose、content_summary 和 transition_to_next
+3. 每个章节要给出 target_claims、key_sources、citation_plan 和 evidence_gaps
 4. 为每个章节标注建议插入的图表（suggested_figures），描述图表的类型和应展示的内容，无需图表的章节留空数组
 5. 输出有效的 JSON 格式"""
 
 PLANNER_USER_PROMPT = """研究主题：{topic}
+
+论文类型：{paper_type}
+结构模式：{structure_pattern}
+目标字数：{target_word_count}
 
 检索到的相关文献：
 {papers_summary}
@@ -35,13 +40,33 @@ PLANNER_USER_PROMPT = """研究主题：{topic}
 {{
     "title": "{title_placeholder}",
     "abstract": "{abstract_placeholder}",
+    "paper_type": "empirical|literature_review|theoretical|case_study|policy_brief|conference|auto",
+    "structure_pattern": "IMRaD|thematic_review|theoretical_analysis|case_study|policy_brief|conference_short|auto",
+    "rationale": "为什么选择该结构",
     "sections": [
         {{
             "title": "章节标题",
             "description": "章节描述",
             "order": 1,
+            "purpose": "本章节在整篇论文中的作用",
+            "content_summary": "2-3句说明本章节具体要写什么",
+            "target_words": 900,
             "key_points": ["关键论点1", "关键论点2"],
+            "target_claims": ["本节需要建立或论证的具体主张"],
+            "key_sources": ["[1] 文献标题或来源用途"],
+            "citation_plan": ["用[1]支撑背景定义", "用[2]对比方法差异"],
+            "evidence_gaps": ["仍缺少的证据或需要后续检索的问题"],
+            "transition_to_next": "本节如何过渡到下一节",
             "suggested_figures": ["折线图：展示模型在不同数据集上的准确率对比", "表格：各方法的时间复杂度与空间复杂度对比"]
+        }}
+    ],
+    "evidence_map": [
+        {{
+            "section_title": "章节标题",
+            "target_claims": ["主张"],
+            "key_sources": ["[1]"],
+            "citation_plan": ["引用计划"],
+            "evidence_gaps": ["证据缺口"]
         }}
     ],
     "keywords": ["{keyword_placeholder}1", "{keyword_placeholder}2", "{keyword_placeholder}3"]

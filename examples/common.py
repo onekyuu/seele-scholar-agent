@@ -24,10 +24,14 @@ def build_model() -> ChatOpenAI:
 def build_prompts() -> PromptsConfig:
     return PromptsConfig(
         planner_system_prompt=(
-            "You are an academic outline planner. Generate a structured {language} "
-            "paper outline as valid JSON."
+            "You are an academic structure architect. Select an appropriate "
+            "paper type and structure pattern, then generate a structured "
+            "{language} outline as valid JSON."
         ),
         planner_user_prompt="""Topic: {topic}
+Paper type: {paper_type}
+Structure pattern: {structure_pattern}
+Target word count: {target_word_count}
 
 Papers:
 {papers_summary}
@@ -36,13 +40,33 @@ Return JSON:
 {{
   "title": "{title_placeholder}",
   "abstract": "{abstract_placeholder}",
+  "paper_type": "empirical|literature_review|theoretical|case_study|policy_brief|conference|auto",
+  "structure_pattern": "IMRaD|thematic_review|theoretical_analysis|case_study|auto",
+  "rationale": "Why this structure fits the topic and literature",
   "sections": [
     {{
       "title": "Section title",
       "description": "Section goal",
       "order": 1,
+      "purpose": "Role of this section in the paper",
+      "content_summary": "Two to three sentences describing what this section will cover",
+      "target_words": 900,
       "key_points": ["point"],
+      "target_claims": ["claim this section should establish"],
+      "key_sources": ["[1] source title or intended use"],
+      "citation_plan": ["Use [1] for background definitions"],
+      "evidence_gaps": ["Evidence still needed"],
+      "transition_to_next": "How this section leads into the next one",
       "suggested_figures": []
+    }}
+  ],
+  "evidence_map": [
+    {{
+      "section_title": "Section title",
+      "target_claims": ["claim"],
+      "key_sources": ["[1]"],
+      "citation_plan": ["citation purpose"],
+      "evidence_gaps": ["gap"]
     }}
   ],
   "keywords": ["{keyword_placeholder}"]
