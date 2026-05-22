@@ -19,6 +19,12 @@ def test_paper_metadata_defaults():
     assert paper.source == "openalex"
     assert paper.url is None
     assert paper.pdf_url is None
+    assert paper.doi is None
+    assert paper.year is None
+    assert paper.venue is None
+    assert paper.query_overlap_score == 0.0
+    assert paper.embedding_similarity is None
+    assert paper.user_priority == 0.0
 
 
 def test_paper_metadata_invalid_source():
