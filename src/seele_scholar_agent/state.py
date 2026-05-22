@@ -13,7 +13,13 @@ class PaperMetadata(BaseModel):
     abstract: str
     url: str | None = None
     pdf_url: str | None = None
+    doi: str | None = None
+    year: int | None = None
+    venue: str | None = None
     relevance_score: float = 0.0
+    query_overlap_score: float = 0.0
+    embedding_similarity: float | None = None
+    user_priority: float = 0.0
     source: Literal["arxiv", "semantic_scholar", "openalex", "user_library"] = "openalex"
 
 

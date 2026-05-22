@@ -1,26 +1,24 @@
-import json
 from typing import cast
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest
-
 from seele_scholar_agent.nodes.researcher import (
     ArxivRetriever,
     OpenAlexRetriever,
     ResearcherNode,
     SemanticScholarRetriever,
+    _dedupe_and_rank_papers,
 )
 from seele_scholar_agent.state import AgentState, PaperMetadata
+
 from tests.fixtures.mock_responses import (
     ARXIV_EMPTY_FEED_XML,
     ARXIV_MISSING_TITLE_XML,
     ARXIV_SINGLE_ENTRY_XML,
     ARXIV_TWO_ENTRIES_XML,
-    OPENALEX_EMPTY_RESULTS,
     OPENALEX_NULL_ABSTRACT,
     OPENALEX_SINGLE_RESULT,
-    SEMANTIC_SCHOLAR_EMPTY,
     SEMANTIC_SCHOLAR_TWO_PAPERS,
 )
 
@@ -29,14 +27,21 @@ def _make_paper(
     paper_id: str,
     source: str = "openalex",
     relevance_score: float = 0.5,
+    title: str | None = None,
+    authors: list[str] | None = None,
+    abstract: str = "",
+    doi: str | None = None,
+    year: int | None = None,
 ) -> PaperMetadata:
     return PaperMetadata(
         paper_id=paper_id,
-        title=paper_id.title(),
-        authors=[],
-        abstract="",
+        title=title or paper_id.title(),
+        authors=authors or [],
+        abstract=abstract,
         source=source,  # type: ignore[arg-type]
         relevance_score=relevance_score,
+        doi=doi,
+        year=year,
     )
 
 
@@ -51,6 +56,39 @@ async def test_arxiv_retriever_parse_xml(respx_mock):
     assert papers[0].source == "arxiv"
     assert "First Test Paper" in [p.title for p in papers]
     assert "Second Test Paper" in [p.title for p in papers]
+
+
+@pytest.mark.asyncio
+async def test_arxiv_retriever_uses_encoded_all_query(respx_mock):
+    respx_mock.get(url__startswith="https://export.arxiv.org").mock(
+        return_value=httpx.Response(200, text=ARXIV_EMPTY_FEED_XML)
+    )
+    retriever = ArxivRetriever()
+
+    await retriever.search("large language model")
+
+    called_url = str(respx_mock.calls.last.request.url)
+    assert "search_query=all%3Alarge+language+model" in called_url
+
+
+def test_arxiv_retriever_parses_atom_authors():
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>https://arxiv.org/abs/2401.00001</id>
+    <title>Atom Author Paper</title>
+    <author><name>Alice Author</name></author>
+    <author><name>Bob Researcher</name></author>
+    <published>2024-01-01T00:00:00Z</published>
+    <summary>Paper abstract.</summary>
+  </entry>
+</feed>"""
+    retriever = ArxivRetriever()
+
+    papers = retriever._parse_response(xml)
+
+    assert papers[0].authors == ["Alice Author", "Bob Researcher"]
+    assert papers[0].year == 2024
 
 
 @pytest.mark.asyncio
@@ -181,6 +219,77 @@ async def test_researcher_node_deduplication(state_with_papers, respx_mock):
     assert len(result["papers"]) == 1
 
 
+def test_researcher_dedupes_by_doi_title_and_author_year():
+    doi_a = _make_paper(
+        "openalex:1",
+        title="Retrieval Augmented Generation for Scholarly Writing",
+        authors=["Jane Doe"],
+        abstract="Retrieval augmented generation for scholarly writing.",
+        doi="10.1234/RAG.001",
+        year=2024,
+        relevance_score=0.4,
+    )
+    doi_b = _make_paper(
+        "s2:2",
+        source="semantic_scholar",
+        title="Retrieval-Augmented Generation for Scholarly Writing",
+        authors=["J. Doe"],
+        abstract="Same paper from another source.",
+        doi="https://doi.org/10.1234/rag.001",
+        year=2024,
+        relevance_score=0.8,
+    )
+    title_duplicate = _make_paper(
+        "arxiv:3",
+        source="arxiv",
+        title="Retrieval Augmented Generation for Scholarly Writing",
+        authors=["Jane Doe"],
+        abstract="Preprint copy.",
+        year=2024,
+        relevance_score=0.7,
+    )
+
+    ranked = _dedupe_and_rank_papers(
+        [doi_a, doi_b, title_duplicate],
+        ["retrieval augmented generation scholarly writing"],
+    )
+
+    assert len(ranked) == 1
+    assert ranked[0].doi == "10.1234/rag.001"
+    assert ranked[0].query_overlap_score > 0
+
+
+def test_researcher_rerank_uses_query_overlap_and_user_priority():
+    low_overlap = _make_paper(
+        "low",
+        title="Unrelated Optimization",
+        abstract="A paper about unrelated systems.",
+        relevance_score=0.8,
+    )
+    high_overlap = _make_paper(
+        "high",
+        title="Large Language Model Alignment",
+        abstract="Large language model alignment and safety evaluation.",
+        relevance_score=0.2,
+    )
+    user_paper = _make_paper(
+        "user",
+        source="user_library",
+        title="Alignment Notes",
+        abstract="Large language model alignment notes.",
+        relevance_score=0.2,
+    )
+
+    ranked = _dedupe_and_rank_papers(
+        [low_overlap, high_overlap, user_paper],
+        ["large language model alignment"],
+    )
+
+    assert ranked[0].paper_id in {"high", "user"}
+    assert ranked[0].query_overlap_score > low_overlap.query_overlap_score
+    assert any(p.user_priority > 0 for p in ranked if p.source == "user_library")
+
+
 @pytest.mark.asyncio
 async def test_researcher_node_sorted_by_relevance(base_state, respx_mock):
     p_low = PaperMetadata(
@@ -213,6 +322,20 @@ async def test_researcher_node_sorted_by_relevance(base_state, respx_mock):
 
     scores = [p.relevance_score for p in result["papers"]]
     assert scores == sorted(scores, reverse=True)
+
+
+@pytest.mark.asyncio
+async def test_researcher_non_english_without_llm_returns_fallback_queries(base_state):
+    with (
+        patch.object(OpenAlexRetriever, "search", return_value=[]),
+        patch.object(SemanticScholarRetriever, "search", return_value=[]),
+        patch.object(ArxivRetriever, "search", return_value=[]),
+    ):
+        node = ResearcherNode(llm=None)
+        result = await node.search(cast(AgentState, {**base_state, "topic": "大语言模型 RAG"}))
+
+    assert "大语言模型 RAG" in result["search_queries"]
+    assert "RAG" in result["search_queries"]
 
 
 @pytest.mark.asyncio
@@ -356,6 +479,7 @@ async def test_extra_retriever_sorted_with_builtins(base_state):
         node = ResearcherNode(extra_paper_retrievers=[extra_retriever])
         result = await node.search(cast(AgentState, {**base_state, "topic": "test"}))
 
+    assert result["papers"][0].paper_id == "extra:high"
     scores = [p.relevance_score for p in result["papers"]]
     assert scores == sorted(scores, reverse=True)
     assert result["papers"][0].paper_id == "extra:high"
