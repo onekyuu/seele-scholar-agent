@@ -1,4 +1,5 @@
 from .agent_config import PaperSearchFunc, RAGRetrieverFunc
+from .evals import QualityMetrics, evaluate_quality
 from .graph import create_simple_writing_graph, create_writing_graph
 from .logging import setup_logging
 from .nodes import NodeStreamEvent
@@ -46,4 +47,6 @@ __all__ = [
     "SectionDraft",
     "RAGRetrieverFunc",
     "PaperSearchFunc",
+    "QualityMetrics",
+    "evaluate_quality",
 ]

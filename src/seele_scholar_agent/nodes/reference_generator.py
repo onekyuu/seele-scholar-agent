@@ -1,7 +1,7 @@
 import asyncio
 import re
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal
 
 from ..logging import get_logger
 from ..state import AgentState, PaperMetadata, QualityIssue, ReferenceEntry
@@ -52,9 +52,9 @@ async def _enrich_from_crossref(
     paper: PaperMetadata,
     semaphore: asyncio.Semaphore,
 ) -> CrossRefMetadata | None:
-    doi: str | None = None
+    doi = paper.doi
     if paper.url:
-        doi = extract_doi_from_url(paper.url)
+        doi = doi or extract_doi_from_url(paper.url)
     if not doi and paper.pdf_url:
         doi = extract_doi_from_url(paper.pdf_url)
     if not doi:
@@ -107,16 +107,21 @@ class ReferenceGeneratorNode:
 
         entries: list[ReferenceEntry] = []
         for (num, paper), cr in zip(target_papers, crossref_results, strict=True):
+            verification_source: Literal["crossref", "openalex", "local", "none"]
             if cr is not None:
                 year = cr.year
                 venue = cr.venue
                 authors = cr.authors if cr.authors else paper.authors
                 doi = cr.doi or None
+                metadata_verified = True
+                verification_source = "crossref"
             else:
-                year = _extract_year_from_paper(paper)
-                venue = None
+                year = paper.year or _extract_year_from_paper(paper)
+                venue = paper.venue
                 authors = paper.authors
-                doi = extract_doi_from_url(paper.url) if paper.url else None
+                doi = paper.doi or (extract_doi_from_url(paper.url) if paper.url else None)
+                metadata_verified = bool(doi and paper.source == "openalex")
+                verification_source = "openalex" if metadata_verified else "local"
 
             entry = ReferenceEntry(
                 number=num,
@@ -127,6 +132,8 @@ class ReferenceGeneratorNode:
                 venue=venue,
                 url=paper.url,
                 doi=doi,
+                metadata_verified=metadata_verified,
+                verification_source=verification_source,
                 formatted="",
             )
             entry = entry.model_copy(update={"formatted": _format_reference(entry)})

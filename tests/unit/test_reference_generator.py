@@ -193,6 +193,8 @@ async def test_reference_generator_crossref_enriches_year_venue_doi(base_state, 
     assert ref.venue == "Advances in Neural Information Processing Systems"
     assert ref.doi == "10.48550/arXiv.1706.03762"
     assert "Vaswani, Ashish" in ref.authors
+    assert ref.metadata_verified is True
+    assert ref.verification_source == "crossref"
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +221,39 @@ async def test_reference_generator_crossref_empty_authors_falls_back(base_state,
 
     ref = result["references"][0]
     assert ref.authors == sample_papers[0].authors
+
+
+@pytest.mark.asyncio
+async def test_reference_generator_uses_paper_doi_for_crossref_lookup(base_state):
+    paper = PaperMetadata(
+        paper_id="user:1",
+        title="Provided DOI Paper",
+        authors=["Author A"],
+        abstract="Abstract.",
+        doi="10.1000/provided",
+        source="user_library",
+    )
+    sections = [_make_section("See [1].")]
+    state = cast(AgentState, {**base_state, "papers": [paper], "sections": sections})
+    cr_meta = CrossRefMetadata(
+        doi="10.1000/provided",
+        year=2024,
+        venue="Journal",
+        authors=["Author A"],
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=cr_meta,
+    ) as fetch_metadata:
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
+
+    fetch_metadata.assert_awaited_once_with("10.1000/provided")
+    ref = result["references"][0]
+    assert ref.metadata_verified is True
+    assert ref.verification_source == "crossref"
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +285,8 @@ async def test_reference_generator_crossref_failure_falls_back_to_local(base_sta
     ref = result["references"][0]
     assert ref.year == 2021
     assert ref.venue is None
+    assert ref.metadata_verified is False
+    assert ref.verification_source == "local"
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +317,8 @@ async def test_reference_generator_doi_extracted_from_url_on_crossref_failure(ba
 
     ref = result["references"][0]
     assert ref.doi == "10.1038/nature12373"
+    assert ref.metadata_verified is True
+    assert ref.verification_source == "openalex"
 
 
 # ---------------------------------------------------------------------------

@@ -137,6 +137,8 @@ class ReferenceEntry(BaseModel):
     venue: str | None = None
     url: str | None = None
     doi: str | None = None
+    metadata_verified: bool = False
+    verification_source: Literal["crossref", "openalex", "local", "none"] = "none"
     formatted: str
 
 
@@ -162,6 +164,7 @@ class AgentState(TypedDict):
     paper_type: NotRequired[str]
     structure_pattern: NotRequired[str]
     target_word_count: NotRequired[int]
+    strict_academic_mode: NotRequired[bool]
     broad_papers: list[PaperMetadata]
     proposed_topics: list[ProposedTopic]
     language: Literal["zh", "en", "ja"]
