@@ -3,6 +3,7 @@ from pydantic import ValidationError
 from seele_scholar_agent.state import (
     OutlineStructure,
     PaperMetadata,
+    QualityIssue,
     ReviewIssue,
     ReviewResult,
     SectionDraft,
@@ -94,3 +95,10 @@ def test_section_outline_key_points_default():
     assert s.target_claims == []
     assert s.key_sources == []
     assert s.evidence_gaps == []
+
+
+def test_quality_issue_defaults():
+    issue = QualityIssue(code="TEST", message="Test issue")
+    assert issue.severity == "error"
+    assert issue.blocking is False
+    assert issue.details == {}

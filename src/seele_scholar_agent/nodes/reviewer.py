@@ -10,7 +10,7 @@ from ..agent_config import PromptsConfig
 from ..config import settings
 from ..i18n import t
 from ..logging import get_logger
-from ..state import AgentState, PaperMetadata, ReviewIssue, ReviewResult
+from ..state import AgentState, PaperMetadata, QualityIssue, ReviewIssue, ReviewResult
 from . import CITATION_PATTERN, NodeStreamEvent, _stream_llm_text, invoke_with_retry
 
 logger = get_logger(__name__)
@@ -292,29 +292,53 @@ class ReviewerNode:
         lang = state.get("language", "zh")
 
         if section_revision_count >= max_revisions:
-            logger.warning("max revisions reached, forcing approval")
+            logger.warning(
+                "max revisions reached, blocking section instead of forcing approval",
+                section=section.title,
+                revision_count=section_revision_count,
+                max_revisions=max_revisions,
+            )
             updated = sections.copy()
-            updated[index] = section.model_copy(update={"status": "approved"})
+            issue_summaries = [issue.description for issue in review.issues if issue.description]
+            comments = [
+                t(lang, "review_round", round=section_revision_count, score=review.score),
+                t(lang, "review_opinion", summary=review.summary),
+            ]
+            for i, issue in enumerate(review.issues, 1):
+                comments.append(
+                    t(lang, "review_issue", i=i, type=issue.type, description=issue.description)
+                )
+                comments.append(t(lang, "review_suggestion", suggestion=issue.suggestion))
+            updated[index] = section.model_copy(
+                update={"status": "review", "review_comments": comments}
+            )
 
-            completed = state.get("sections_completed", [])
-            completed.append(section.title)
-
-            if index + 1 >= len(sections):
-                return {
-                    "sections": updated,
-                    "sections_completed": completed,
-                    "review_history": [record],
-                    "current_review": review.model_dump(),
-                    "status": "completed",
-                }
+            quality_issue = QualityIssue(
+                code="MAX_REVISIONS_REACHED",
+                message=(
+                    f"Section '{section.title}' failed review after "
+                    f"{section_revision_count} revision(s)."
+                ),
+                severity="blocking",
+                location=section.section_id,
+                blocking=True,
+                details={
+                    "section_title": section.title,
+                    "revision_count": section_revision_count,
+                    "max_revisions": max_revisions,
+                    "review_score": review.score,
+                    "review_summary": review.summary,
+                    "review_issues": issue_summaries,
+                },
+            )
 
             return {
                 "sections": updated,
-                "sections_completed": completed,
-                "current_section_index": index + 1,
                 "review_history": [record],
                 "current_review": review.model_dump(),
-                "status": "writing",
+                "quality_issues": [quality_issue],
+                "status": "waiting_human",
+                "error_message": quality_issue.message,
             }
 
         next_section_revision_count = section_revision_count + 1

@@ -117,6 +117,15 @@ class ConsistencyIssue(BaseModel):
     suggestion: str
 
 
+class QualityIssue(BaseModel):
+    code: str
+    message: str
+    severity: Literal["info", "warning", "error", "blocking"] = "error"
+    location: str | None = None
+    blocking: bool = False
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
 class AgentState(TypedDict):
     thread_id: str
     topic: str
@@ -167,3 +176,4 @@ class AgentState(TypedDict):
     references: list[ReferenceEntry]
     consistency_issues: list[ConsistencyIssue]
     consistency_checked: bool
+    quality_issues: Annotated[list[QualityIssue], operator.add]
