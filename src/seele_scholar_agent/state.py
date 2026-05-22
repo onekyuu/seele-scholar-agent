@@ -1,6 +1,6 @@
 import operator
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NotRequired
 
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
@@ -31,19 +31,39 @@ class DocumentChunk(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SectionEvidencePlan(BaseModel):
+    section_title: str
+    target_claims: list[str] = Field(default_factory=list)
+    key_sources: list[str] = Field(default_factory=list)
+    evidence_gaps: list[str] = Field(default_factory=list)
+    citation_plan: list[str] = Field(default_factory=list)
+
+
 class SectionOutline(BaseModel):
     title: str
     description: str = ""
     order: int
     key_points: list[str] = Field(default_factory=list)
     suggested_figures: list[str] = Field(default_factory=list)
+    purpose: str = ""
+    content_summary: str = ""
+    target_words: int | None = None
+    target_claims: list[str] = Field(default_factory=list)
+    key_sources: list[str] = Field(default_factory=list)
+    evidence_gaps: list[str] = Field(default_factory=list)
+    citation_plan: list[str] = Field(default_factory=list)
+    transition_to_next: str = ""
 
 
 class OutlineStructure(BaseModel):
     title: str
     abstract: str
-    sections: list[SectionOutline] = []
-    keywords: list[str] = []
+    sections: list[SectionOutline] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    paper_type: str = "auto"
+    structure_pattern: str = "auto"
+    rationale: str = ""
+    evidence_map: list[SectionEvidencePlan] = Field(default_factory=list)
 
 
 class SectionDraft(BaseModel):
@@ -100,6 +120,9 @@ class ConsistencyIssue(BaseModel):
 class AgentState(TypedDict):
     thread_id: str
     topic: str
+    paper_type: NotRequired[str]
+    structure_pattern: NotRequired[str]
+    target_word_count: NotRequired[int]
     broad_papers: list[PaperMetadata]
     proposed_topics: list[ProposedTopic]
     language: Literal["zh", "en", "ja"]
