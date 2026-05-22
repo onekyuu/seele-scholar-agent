@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from seele_scholar_agent.nodes.reviewer import ReviewerNode
-from seele_scholar_agent.state import AgentState, PaperMetadata, SectionDraft
+from seele_scholar_agent.state import AgentState, ClaimEvidenceBinding, PaperMetadata, SectionDraft
 
 
 def _make_state_with_written_section(
@@ -559,3 +559,91 @@ async def test_reviewer_citation_alignment_failure_does_not_block_review(
         result = await node.review(state)
 
     assert result["status"] in ("completed", "writing")
+
+
+@pytest.mark.asyncio
+async def test_reviewer_rejects_unsupported_claim_source_binding(
+    mock_llm, mock_prompts, base_state
+):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="Evidence Paper",
+            authors=["Author"],
+            abstract="Evidence abstract.",
+            source="openalex",
+        )
+    ]
+    section = _written_section("Discussion", content="A strong claim is made [1].", index=0)
+    binding = ClaimEvidenceBinding(
+        section_id=section.section_id,
+        claim_text="A strong claim is made [1].",
+        citation_number=1,
+        support_score=0.0,
+        verdict="unsupported",
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "papers": papers,
+            "claim_evidence_bindings": [binding],
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "writing"
+    assert result["sections"][0].status == "writing"
+    current_review = result["current_review"]
+    assert current_review["approved"] is False
+    assert current_review["issues"][0]["type"] == "citation_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_reviewer_accepts_supported_claim_source_binding(
+    mock_llm, mock_prompts, base_state
+):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="Evidence Paper",
+            authors=["Author"],
+            abstract="Evidence abstract.",
+            source="openalex",
+        )
+    ]
+    section = _written_section("Discussion", content="A supported claim is made [1].", index=0)
+    binding = ClaimEvidenceBinding(
+        section_id=section.section_id,
+        claim_text="A supported claim is made [1].",
+        citation_number=1,
+        chunk_id="c1",
+        support_score=0.8,
+        verdict="supported",
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "papers": papers,
+            "claim_evidence_bindings": [binding],
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "completed"
+    assert result["sections"][0].status == "approved"

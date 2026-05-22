@@ -92,7 +92,7 @@ Previous sections:
 Papers:
 {numbered_papers}
 
-RAG context:
+Evidence packets:
 {rag_context}
 
 Review comments:
@@ -232,6 +232,8 @@ def build_initial_state(topic: str, language: str = "zh") -> AgentState:
         review_history=[],
         current_review=None,
         rag_context=[],
+        evidence_packets=[],
+        claim_evidence_bindings=[],
         section_summaries=[],
         paper_summaries=[],
         status="idle",

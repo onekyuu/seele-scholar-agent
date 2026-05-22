@@ -11,7 +11,15 @@ from .nodes.researcher import ResearcherNode
 from .nodes.reviewer import ReviewerNode
 from .nodes.topic_proposer import TopicProposerNode
 from .nodes.writer import WriterNode
-from .state import AgentState, OutlineStructure, PaperMetadata, QualityIssue, SectionDraft
+from .state import (
+    AgentState,
+    ClaimEvidenceBinding,
+    EvidencePacket,
+    OutlineStructure,
+    PaperMetadata,
+    QualityIssue,
+    SectionDraft,
+)
 
 __version__ = "0.11.2"
 
@@ -32,6 +40,8 @@ __all__ = [
     "AgentState",
     "PaperMetadata",
     "QualityIssue",
+    "EvidencePacket",
+    "ClaimEvidenceBinding",
     "OutlineStructure",
     "SectionDraft",
     "RAGRetrieverFunc",

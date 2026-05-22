@@ -6,10 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
-
 from seele_scholar_agent.nodes.writer import WriterNode
-from seele_scholar_agent.state import AgentState, SectionDraft
-
+from seele_scholar_agent.state import AgentState, DocumentChunk, EvidencePacket, SectionDraft
 
 # ---------------------------------------------------------------------------
 # W-01: Normal write → sections[0].content filled, status="reviewing"
@@ -414,8 +412,6 @@ def test_writer_build_suggested_figures_empty_list(mock_llm, mock_prompts, state
 
 
 def test_writer_build_rag_context_includes_chunk_id(mock_llm, mock_prompts):
-    from seele_scholar_agent.state import DocumentChunk
-
     chunks = [
         DocumentChunk(chunk_id="abc123", content="Transformer paper content.", source="arxiv"),
         DocumentChunk(chunk_id="def456", content="BERT paper content.", source="s2"),
@@ -458,6 +454,91 @@ def test_writer_clean_content_preserves_figure_placeholder(mock_llm, mock_prompt
     assert "{{FIGURE: Bar chart of accuracy | chunks:[abc123,def456]}}" in cleaned
     assert "{{TABLE: Comparison of methods | chunks:[xyz789]}}" in cleaned
     assert "More text follows." in cleaned
+
+
+def test_writer_chunks_to_evidence_packets(mock_llm, mock_prompts):
+    chunk = DocumentChunk(
+        chunk_id="c1",
+        content="Quoted evidence about Transformer architecture.",
+        source="arxiv",
+        metadata={
+            "paper_id": "arxiv:2301.00001",
+            "title": "Attention Is All You Need",
+            "authors": ["Vaswani", "Shazeer"],
+            "year": 2017,
+            "page": "3",
+            "section": "Model Architecture",
+            "relevance_score": 0.9,
+            "why_relevant": "Supports the architecture claim.",
+            "quote": "The Transformer architecture uses attention mechanisms.",
+        },
+    )
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+
+    packets = node._chunks_to_evidence_packets(
+        [chunk], section_title="Introduction", why_relevant="query"
+    )
+
+    assert packets[0].chunk_id == "c1"
+    assert packets[0].source_paper_id == "arxiv:2301.00001"
+    assert packets[0].title == "Attention Is All You Need"
+    assert packets[0].authors == ["Vaswani", "Shazeer"]
+    assert packets[0].quote == "The Transformer architecture uses attention mechanisms."
+
+
+@pytest.mark.asyncio
+async def test_writer_returns_evidence_packets_and_claim_bindings(
+    mock_llm, mock_prompts, state_with_outline, sample_papers
+):
+    chunk = DocumentChunk(
+        chunk_id="c1",
+        content="The Transformer architecture uses attention mechanisms.",
+        source="arxiv",
+        metadata={
+            "paper_id": sample_papers[0].paper_id,
+            "title": sample_papers[0].title,
+            "quote": "The Transformer architecture uses attention mechanisms.",
+            "relevance_score": 0.9,
+        },
+    )
+
+    async def rag_retriever(_query: str) -> list[DocumentChunk]:
+        return [chunk]
+
+    with patch(
+        "seele_scholar_agent.nodes.writer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=AIMessage(content="The Transformer architecture uses attention [1]."),
+    ):
+        node = WriterNode(llm=mock_llm, prompts=mock_prompts, rag_retriever=rag_retriever)
+        result = await node.write({**state_with_outline, "papers": sample_papers})
+
+    assert result["evidence_packets"][0].chunk_id == "c1"
+    binding = result["claim_evidence_bindings"][0]
+    assert binding.citation_number == 1
+    assert binding.chunk_id == "c1"
+    assert binding.verdict == "supported"
+
+
+def test_writer_build_rag_context_formats_evidence_packet(mock_llm, mock_prompts):
+    packet = EvidencePacket(
+        chunk_id="packet-1",
+        title="Evidence Paper",
+        authors=["Author A"],
+        year=2024,
+        page="7",
+        section="Findings",
+        relevance_score=0.8,
+        why_relevant="Supports a cited claim.",
+        quote="Evidence quote.",
+    )
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+
+    result = node._build_rag_context([packet])
+
+    assert "[chunk_id:packet-1]" in result
+    assert "title: Evidence Paper" in result
+    assert "quote: Evidence quote." in result
 
 
 # ---------------------------------------------------------------------------

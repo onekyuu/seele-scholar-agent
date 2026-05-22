@@ -107,7 +107,7 @@ WRITER_USER_PROMPT = """论文主题：{topic}
 可引用论文列表（引用时只能使用以下编号，格式为 [N]）：
 {numbered_papers}
 
-相关文献上下文（每段前标注了 chunk_id，插入图表占位符时从中选取相关 chunk_id 绑定）：
+相关文献证据包（每段包含 chunk_id、标题、作者、年份、页码、相关性说明和 quote；引用事实性主张时应绑定具体 chunk_id）：
 {rag_context}
 
 历史审稿意见：
@@ -385,6 +385,8 @@ def base_state() -> AgentState:
         review_history=[],
         current_review=None,
         rag_context=[],
+        evidence_packets=[],
+        claim_evidence_bindings=[],
         status="idle",
         error_message=None,
         max_revisions=3,

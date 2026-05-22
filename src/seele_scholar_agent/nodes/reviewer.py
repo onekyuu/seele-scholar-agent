@@ -10,7 +10,14 @@ from ..agent_config import PromptsConfig
 from ..config import settings
 from ..i18n import t
 from ..logging import get_logger
-from ..state import AgentState, PaperMetadata, QualityIssue, ReviewIssue, ReviewResult
+from ..state import (
+    AgentState,
+    ClaimEvidenceBinding,
+    PaperMetadata,
+    QualityIssue,
+    ReviewIssue,
+    ReviewResult,
+)
 from . import CITATION_PATTERN, NodeStreamEvent, _stream_llm_text, invoke_with_retry
 
 logger = get_logger(__name__)
@@ -107,6 +114,16 @@ class ReviewerNode:
                 if review.approved:
                     review = review.model_copy(update={"approved": False})
 
+        claim_source_issues = self._verify_claim_source_support(
+            section.section_id,
+            section.content,
+            state.get("claim_evidence_bindings", []),
+        )
+        if claim_source_issues:
+            review.issues.extend(claim_source_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
+
         record = {
             "section": section.title,
             "score": review.score,
@@ -182,6 +199,16 @@ class ReviewerNode:
                 if review.approved:
                     review = review.model_copy(update={"approved": False})
 
+        claim_source_issues = self._verify_claim_source_support(
+            section.section_id,
+            section.content,
+            state.get("claim_evidence_bindings", []),
+        )
+        if claim_source_issues:
+            review.issues.extend(claim_source_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
+
         record = {
             "section": section.title,
             "score": review.score,
@@ -251,6 +278,50 @@ class ReviewerNode:
         except Exception as e:
             logger.warning("citation alignment check failed", error=str(e))
             return []
+
+    def _verify_claim_source_support(
+        self,
+        section_id: str,
+        content: str,
+        bindings: list[ClaimEvidenceBinding],
+    ) -> list[ReviewIssue]:
+        section_bindings = [binding for binding in bindings if binding.section_id == section_id]
+        if not section_bindings:
+            return []
+
+        cited_numbers = {int(m) for m in CITATION_PATTERN.findall(content)}
+        bound_numbers = {binding.citation_number for binding in section_bindings}
+        issues: list[ReviewIssue] = []
+
+        for citation_number in sorted(cited_numbers - bound_numbers):
+            issues.append(
+                ReviewIssue(
+                    type="citation_mismatch",
+                    description=f"Citation [{citation_number}] is not bound to evidence.",
+                    suggestion="Bind the cited claim to an evidence packet before approval.",
+                    location=f"[{citation_number}]",
+                )
+            )
+
+        for binding in section_bindings:
+            if binding.verdict == "supported":
+                continue
+            issues.append(
+                ReviewIssue(
+                    type="citation_mismatch",
+                    description=(
+                        f"Claim-source support is {binding.verdict} for citation "
+                        f"[{binding.citation_number}]: {binding.claim_text}"
+                    ),
+                    suggestion=(
+                        "Replace the citation with a better-supported source, add a more "
+                        "specific evidence packet, or revise the claim."
+                    ),
+                    location=f"[{binding.citation_number}]",
+                )
+            )
+
+        return issues
 
     async def _handle_approved(
         self, state: AgentState, section: Any, review: ReviewResult, record: dict[str, Any]

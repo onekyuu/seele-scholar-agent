@@ -30,6 +30,8 @@ def make_base_state(topic: str = "Large Language Models", language: str = "zh") 
         review_history=[],
         current_review=None,
         rag_context=[],
+        evidence_packets=[],
+        claim_evidence_bindings=[],
         status="idle",
         error_message=None,
         max_revisions=3,
