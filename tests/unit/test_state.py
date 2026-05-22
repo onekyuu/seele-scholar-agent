@@ -1,6 +1,8 @@
 import pytest
 from pydantic import ValidationError
 from seele_scholar_agent.state import (
+    ClaimEvidenceBinding,
+    EvidencePacket,
     OutlineStructure,
     PaperMetadata,
     QualityIssue,
@@ -102,3 +104,22 @@ def test_quality_issue_defaults():
     assert issue.severity == "error"
     assert issue.blocking is False
     assert issue.details == {}
+
+
+def test_evidence_packet_defaults():
+    packet = EvidencePacket(chunk_id="c1", quote="Quoted text")
+    assert packet.title == ""
+    assert packet.authors == []
+    assert packet.relevance_score == 0.0
+    assert packet.quote == "Quoted text"
+
+
+def test_claim_evidence_binding_defaults():
+    binding = ClaimEvidenceBinding(
+        section_id="s1",
+        claim_text="Claim [1].",
+        citation_number=1,
+    )
+    assert binding.chunk_id is None
+    assert binding.support_score == 0.0
+    assert binding.verdict == "unverified"

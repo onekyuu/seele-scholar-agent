@@ -31,6 +31,20 @@ class DocumentChunk(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class EvidencePacket(BaseModel):
+    chunk_id: str
+    title: str = ""
+    authors: list[str] = Field(default_factory=list)
+    year: int | None = None
+    page: str | None = None
+    section: str | None = None
+    source: str = ""
+    source_paper_id: str | None = None
+    relevance_score: float = 0.0
+    why_relevant: str = ""
+    quote: str = ""
+
+
 class SectionEvidencePlan(BaseModel):
     section_title: str
     target_claims: list[str] = Field(default_factory=list)
@@ -75,6 +89,16 @@ class SectionDraft(BaseModel):
     status: Literal["pending", "writing", "review", "approved", "auto_generated"] = "pending"
     revision_count: int = 0
     review_comments: list[str] = Field(default_factory=list)
+
+
+class ClaimEvidenceBinding(BaseModel):
+    section_id: str
+    claim_text: str
+    citation_number: int
+    chunk_id: str | None = None
+    source_paper_id: str | None = None
+    support_score: float = 0.0
+    verdict: Literal["supported", "weak", "unsupported", "unverified"] = "unverified"
 
 
 class ReviewIssue(BaseModel):
@@ -148,6 +172,8 @@ class AgentState(TypedDict):
     review_history: Annotated[list[dict[str, Any]], operator.add]
     current_review: ReviewResult | None
     rag_context: Annotated[list[DocumentChunk], operator.add]
+    evidence_packets: Annotated[list[EvidencePacket], operator.add]
+    claim_evidence_bindings: Annotated[list[ClaimEvidenceBinding], operator.add]
 
     # Writer 写完每章后生成的摘要，按章节索引定位（positional list，非累加）
     # section_summaries[i] 对应 sections[i] 的内容摘要，约 150-200 tokens per item
