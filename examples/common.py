@@ -241,4 +241,5 @@ def build_initial_state(topic: str, language: str = "zh") -> AgentState:
         references=[],
         consistency_issues=[],
         consistency_checked=False,
+        quality_issues=[],
     )

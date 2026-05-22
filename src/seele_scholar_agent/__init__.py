@@ -4,13 +4,14 @@ from .logging import setup_logging
 from .nodes import NodeStreamEvent
 from .nodes.consistency_checker import ConsistencyCheckerNode
 from .nodes.finalizer import FinalizerNode
+from .nodes.integrity_gate import IntegrityGateNode
 from .nodes.planner import PlannerNode
 from .nodes.reference_generator import ReferenceGeneratorNode
 from .nodes.researcher import ResearcherNode
 from .nodes.reviewer import ReviewerNode
 from .nodes.topic_proposer import TopicProposerNode
 from .nodes.writer import WriterNode
-from .state import AgentState, OutlineStructure, PaperMetadata, SectionDraft
+from .state import AgentState, OutlineStructure, PaperMetadata, QualityIssue, SectionDraft
 
 __version__ = "0.11.2"
 
@@ -27,8 +28,10 @@ __all__ = [
     "FinalizerNode",
     "ConsistencyCheckerNode",
     "ReferenceGeneratorNode",
+    "IntegrityGateNode",
     "AgentState",
     "PaperMetadata",
+    "QualityIssue",
     "OutlineStructure",
     "SectionDraft",
     "RAGRetrieverFunc",

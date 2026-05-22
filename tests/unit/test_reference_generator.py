@@ -2,7 +2,6 @@ from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from seele_scholar_agent.nodes.reference_generator import ReferenceGeneratorNode
 from seele_scholar_agent.state import AgentState, PaperMetadata, SectionDraft
 from seele_scholar_agent.tools.crossref import CrossRefMetadata, extract_doi_from_url
@@ -45,12 +44,12 @@ async def test_reference_generator_cited_papers_returned(base_state, sample_pape
 
 
 # ---------------------------------------------------------------------------
-# REF-02: No citation markers in sections → full reference list generated
+# REF-02: No citation markers in sections → no references and a blocking quality issue
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_reference_generator_no_citations_generates_full_list(base_state, sample_papers):
+async def test_reference_generator_no_citations_returns_quality_issue(base_state, sample_papers):
     sections = [_make_section("This section has no citation markers.")]
     state = cast(AgentState, {**base_state, "papers": sample_papers, "sections": sections})
 
@@ -62,8 +61,9 @@ async def test_reference_generator_no_citations_generates_full_list(base_state, 
         node = ReferenceGeneratorNode()
         result = await node.generate(state)
 
-    refs = result["references"]
-    assert len(refs) == len(sample_papers)
+    assert result["references"] == []
+    assert result["quality_issues"][0].code == "NO_INLINE_CITATIONS"
+    assert result["quality_issues"][0].blocking is True
     assert result["status"] == "completed"
 
 

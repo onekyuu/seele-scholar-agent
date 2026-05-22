@@ -392,6 +392,7 @@ def base_state() -> AgentState:
         references=[],
         consistency_issues=[],
         consistency_checked=False,
+        quality_issues=[],
     )
 
 

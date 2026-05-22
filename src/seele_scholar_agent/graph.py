@@ -11,6 +11,7 @@ from .agent_config import PaperSearchFunc, PromptsConfig, RAGRetrieverFunc
 from .config import settings
 from .nodes.consistency_checker import ConsistencyCheckerNode
 from .nodes.finalizer import FinalizerNode
+from .nodes.integrity_gate import IntegrityGateNode
 from .nodes.planner import PlannerNode
 from .nodes.reference_generator import ReferenceGeneratorNode
 from .nodes.researcher import ResearcherNode
@@ -41,6 +42,7 @@ def create_writing_graph(
     finalizer = FinalizerNode(llm=model, prompts=prompts)
     consistency_checker = ConsistencyCheckerNode(llm=model, prompts=prompts)
     reference_generator = ReferenceGeneratorNode()
+    integrity_gate = IntegrityGateNode()
 
     graph = StateGraph[AgentState, None, AgentState, AgentState](AgentState)
 
@@ -52,6 +54,7 @@ def create_writing_graph(
     graph.add_node("finalizer", finalizer.finalize)
     graph.add_node("consistency_checker", consistency_checker.check)
     graph.add_node("reference_generator", reference_generator.generate)
+    graph.add_node("integrity_gate", integrity_gate.check)
 
     graph.add_edge(START, "topic_proposer")
     graph.add_edge("topic_proposer", "researcher")
@@ -59,7 +62,10 @@ def create_writing_graph(
     graph.add_edge("planner", "writer")
     graph.add_edge("writer", "reviewer")
 
-    def route_reviewer(state: AgentState) -> Literal["writer", "finalizer"]:
+    def route_reviewer(state: AgentState) -> Literal["writer", "finalizer", "end"]:
+        if state.get("status") == "waiting_human" or _has_blocking_quality_issues(state):
+            return "end"
+
         sections = state["sections"]
         index = state["current_section_index"]
 
@@ -70,11 +76,14 @@ def create_writing_graph(
         return "writer"
 
     graph.add_conditional_edges(
-        "reviewer", route_reviewer, {"writer": "writer", "finalizer": "finalizer"}
+        "reviewer",
+        route_reviewer,
+        {"writer": "writer", "finalizer": "finalizer", "end": END},
     )
     graph.add_edge("finalizer", "reference_generator")
     graph.add_edge("reference_generator", "consistency_checker")
-    graph.add_edge("consistency_checker", END)
+    graph.add_edge("consistency_checker", "integrity_gate")
+    graph.add_edge("integrity_gate", END)
 
     return graph.compile(checkpointer=MemorySaver(), interrupt_after=["topic_proposer", "planner"])
 
@@ -101,6 +110,7 @@ def create_simple_writing_graph(
     finalizer = FinalizerNode(llm=model, prompts=prompts)
     consistency_checker = ConsistencyCheckerNode(llm=model, prompts=prompts)
     reference_generator = ReferenceGeneratorNode()
+    integrity_gate = IntegrityGateNode()
 
     graph = StateGraph[AgentState, None, AgentState, AgentState](AgentState)
 
@@ -112,6 +122,7 @@ def create_simple_writing_graph(
     graph.add_node("finalizer", finalizer.finalize)
     graph.add_node("consistency_checker", consistency_checker.check)
     graph.add_node("reference_generator", reference_generator.generate)
+    graph.add_node("integrity_gate", integrity_gate.check)
 
     graph.add_edge(START, "proposer")
     graph.add_edge("proposer", "researcher")
@@ -119,7 +130,10 @@ def create_simple_writing_graph(
     graph.add_edge("planner", "writer")
     graph.add_edge("writer", "reviewer")
 
-    def should_continue(state: AgentState) -> Literal["writer", "finalizer"]:
+    def should_continue(state: AgentState) -> Literal["writer", "finalizer", "end"]:
+        if state.get("status") == "waiting_human" or _has_blocking_quality_issues(state):
+            return "end"
+
         sections = state["sections"]
         idx = state["current_section_index"]
         if sections[idx].status == "approved" and idx + 1 >= len(sections):
@@ -127,10 +141,19 @@ def create_simple_writing_graph(
         return "writer"
 
     graph.add_conditional_edges(
-        "reviewer", should_continue, {"writer": "writer", "finalizer": "finalizer"}
+        "reviewer",
+        should_continue,
+        {"writer": "writer", "finalizer": "finalizer", "end": END},
     )
     graph.add_edge("finalizer", "reference_generator")
     graph.add_edge("reference_generator", "consistency_checker")
-    graph.add_edge("consistency_checker", END)
+    graph.add_edge("consistency_checker", "integrity_gate")
+    graph.add_edge("integrity_gate", END)
 
     return graph.compile(checkpointer=MemorySaver())
+
+
+def _has_blocking_quality_issues(state: AgentState) -> bool:
+    return any(
+        issue.blocking or issue.severity == "blocking" for issue in state.get("quality_issues", [])
+    )

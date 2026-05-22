@@ -123,12 +123,12 @@ async def test_reviewer_rejected_appends_comments_and_increments_revision(
 
 
 # ---------------------------------------------------------------------------
-# RV-04: revision_count >= max_revisions, rejected → force approved, status="completed"
+# RV-04: revision_count >= max_revisions, rejected → blocking issue, waiting_human
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_reviewer_max_revisions_forces_approval(mock_llm, mock_prompts, base_state):
+async def test_reviewer_max_revisions_blocks_approval(mock_llm, mock_prompts, base_state):
     sections = [_written_section("Introduction", index=0, revision_count=3)]
     state = _make_state_with_written_section(base_state, sections, index=0, max_revisions=3)
 
@@ -146,23 +146,21 @@ async def test_reviewer_max_revisions_forces_approval(mock_llm, mock_prompts, ba
         node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
         result = await node.review(state)
 
-    assert result["status"] == "completed"
-    assert result["sections"][0].status == "approved"
+    assert result["status"] == "waiting_human"
+    assert result["sections"][0].status == "review"
+    assert result["quality_issues"][0].code == "MAX_REVISIONS_REACHED"
+    assert result["quality_issues"][0].blocking is True
 
 
 # ---------------------------------------------------------------------------
-# RV-04b: revision_count >= max_revisions, rejected, NOT last section → force approved,
-#         advance index, status="writing" (bug fix: must continue to next section)
+# RV-04b: revision_count >= max_revisions, rejected, NOT last section → blocks current section
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_reviewer_max_revisions_forces_approval_not_last_section(
+async def test_reviewer_max_revisions_blocks_not_last_section(
     mock_llm, mock_prompts, base_state
 ):
-    """Bug fix verification: When forcing approval on non-last section,
-    must advance to next section and continue writing (not mark as completed).
-    """
     sections = [
         _written_section("Introduction", index=0, revision_count=2),
         _written_section("Related Work", index=1),
@@ -183,14 +181,11 @@ async def test_reviewer_max_revisions_forces_approval_not_last_section(
         node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
         result = await node.review(state)
 
-    # Bug fix: Should NOT be "completed" - must continue to next section
-    assert result["status"] == "writing"
-    # Current section marked approved
-    assert result["sections"][0].status == "approved"
-    # Index advanced to next section
-    assert result["current_section_index"] == 1
-    # Section added to completed list
-    assert "Introduction" in result["sections_completed"]
+    assert result["status"] == "waiting_human"
+    assert result["sections"][0].status == "review"
+    assert "current_section_index" not in result
+    assert "sections_completed" not in result
+    assert result["quality_issues"][0].code == "MAX_REVISIONS_REACHED"
 
 
 # ---------------------------------------------------------------------------

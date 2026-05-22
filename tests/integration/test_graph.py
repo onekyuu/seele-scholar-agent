@@ -159,12 +159,12 @@ async def test_graph_reviewer_rejection_triggers_retry(base_state, mock_prompts)
 
 
 # ---------------------------------------------------------------------------
-# G-04: Graph terminates when max_revisions reached (force-approved)
+# G-04: Graph stops for human review when max_revisions reached
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_graph_max_revisions_forces_completion(base_state, mock_prompts):
+async def test_graph_max_revisions_blocks_completion(base_state, mock_prompts):
     with respx.mock(assert_all_mocked=False, assert_all_called=False) as respx_mock:
         _mock_http(respx_mock)
 
@@ -193,7 +193,9 @@ async def test_graph_max_revisions_forces_completion(base_state, mock_prompts):
 
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": "g-test-004"}})
 
-    assert result["status"] == "completed"
+    assert result["status"] == "waiting_human"
+    assert result["sections"][0].status == "review"
+    assert result["quality_issues"][0].code == "MAX_REVISIONS_REACHED"
 
 
 # ---------------------------------------------------------------------------

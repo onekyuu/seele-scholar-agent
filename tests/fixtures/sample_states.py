@@ -37,6 +37,7 @@ def make_base_state(topic: str = "Large Language Models", language: str = "zh") 
         references=[],
         consistency_issues=[],
         consistency_checked=False,
+        quality_issues=[],
     )
 
 

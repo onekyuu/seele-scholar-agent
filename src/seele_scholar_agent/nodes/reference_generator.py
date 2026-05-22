@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from ..logging import get_logger
-from ..state import AgentState, PaperMetadata, ReferenceEntry
+from ..state import AgentState, PaperMetadata, QualityIssue, ReferenceEntry
 from ..tools.crossref import CrossRefMetadata, extract_doi_from_url, fetch_metadata
 from . import CITATION_PATTERN, NodeStreamEvent
 
@@ -75,8 +75,22 @@ class ReferenceGeneratorNode:
 
         cited_numbers = _collect_cited_numbers([s.content for s in sections if s.content])
         if not cited_numbers:
-            logger.info("no citations found in sections, generating full reference list")
-            cited_numbers = set(range(1, len(papers) + 1))
+            logger.warning("no inline citations found; refusing to generate full references")
+            quality_issue = QualityIssue(
+                code="NO_INLINE_CITATIONS",
+                message=(
+                    "No inline citations were found in the generated sections; "
+                    "reference generation was skipped."
+                ),
+                severity="blocking",
+                location="references",
+                blocking=True,
+            )
+            return {
+                "references": [],
+                "quality_issues": [quality_issue],
+                "status": "completed",
+            }
 
         target_papers: list[tuple[int, PaperMetadata]] = []
         for num in sorted(cited_numbers):
