@@ -24,10 +24,10 @@ from . import (
     _stream_llm_text,
     invoke_with_retry,
 )
+from .claim_audit import RuleBasedClaimExtractor
 
 logger = get_logger(__name__)
 
-_SENTENCE_WITH_CITATION_RE = re.compile(r"([^。\n.!?]*\[\d+\][^。\n.!?]*(?:[。.!?]|$))")
 _WORD_RE = re.compile(r"[A-Za-z0-9_\u4e00-\u9fff]+")
 
 
@@ -151,6 +151,9 @@ class StylePolisher:
 
 
 class CitationBinder:
+    def __init__(self) -> None:
+        self.claim_extractor = RuleBasedClaimExtractor()
+
     def bind(
         self,
         section: SectionDraft,
@@ -182,7 +185,7 @@ class CitationBinder:
         return bindings
 
     def _extract_cited_claims(self, content: str) -> list[str]:
-        matches = [m.group(1).strip() for m in _SENTENCE_WITH_CITATION_RE.finditer(content)]
+        matches = [claim.text for claim in self.claim_extractor.extract_cited_claims(content)]
         if matches:
             return matches
         return [line.strip() for line in content.splitlines() if CITATION_PATTERN.search(line)]
