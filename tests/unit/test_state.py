@@ -6,6 +6,7 @@ from seele_scholar_agent.state import (
     OutlineStructure,
     PaperMetadata,
     QualityIssue,
+    ReferenceEntry,
     ReviewIssue,
     ReviewResult,
     SectionDraft,
@@ -110,6 +111,18 @@ def test_quality_issue_defaults():
     assert issue.severity == "error"
     assert issue.blocking is False
     assert issue.details == {}
+
+
+def test_reference_entry_verification_defaults():
+    reference = ReferenceEntry(
+        number=1,
+        paper_id="p1",
+        title="T",
+        authors=["A"],
+        formatted="[1] A. T",
+    )
+    assert reference.metadata_verified is False
+    assert reference.verification_source == "none"
 
 
 def test_evidence_packet_defaults():
