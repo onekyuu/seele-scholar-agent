@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
 from typing import Any
 
 from langchain_core.output_parsers import JsonOutputParser
@@ -19,8 +20,11 @@ from ..state import (
     ReviewResult,
 )
 from . import CITATION_PATTERN, NodeStreamEvent, _stream_llm_text, invoke_with_retry
+from .claim_audit import ExtractedClaim, RuleBasedClaimExtractor
 
 logger = get_logger(__name__)
+
+_CLAIM_TEXT_MATCH_THRESHOLD = 0.65
 
 
 def _build_numbered_papers_summary(papers: list[PaperMetadata]) -> str:
@@ -56,6 +60,7 @@ class ReviewerNode:
         self.chain = self.prompt | self.llm | self.parser
         self.stream_chain = self.prompt | self.llm
         self.citation_chain = self.citation_alignment_prompt | self.llm | self.parser
+        self.claim_extractor = RuleBasedClaimExtractor()
 
     async def review(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]
@@ -114,7 +119,7 @@ class ReviewerNode:
                 if review.approved:
                     review = review.model_copy(update={"approved": False})
 
-        claim_source_issues = self._verify_claim_source_support(
+        claim_source_issues, claim_quality_issues = self._audit_claim_source_support(
             section.section_id,
             section.content,
             state.get("claim_evidence_bindings", []),
@@ -133,7 +138,7 @@ class ReviewerNode:
 
         if review.approved:
             return await self._handle_approved(state, section, review, record)
-        return await self._handle_rejected(state, section, review, record)
+        return await self._handle_rejected(state, section, review, record, claim_quality_issues)
 
     async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
         sections = state["sections"]
@@ -199,7 +204,7 @@ class ReviewerNode:
                 if review.approved:
                     review = review.model_copy(update={"approved": False})
 
-        claim_source_issues = self._verify_claim_source_support(
+        claim_source_issues, claim_quality_issues = self._audit_claim_source_support(
             section.section_id,
             section.content,
             state.get("claim_evidence_bindings", []),
@@ -219,7 +224,9 @@ class ReviewerNode:
         if review.approved:
             final_result = await self._handle_approved(state, section, review, record)
         else:
-            final_result = await self._handle_rejected(state, section, review, record)
+            final_result = await self._handle_rejected(
+                state, section, review, record, claim_quality_issues
+            )
 
         yield NodeStreamEvent(type="result", result=final_result)
 
@@ -279,49 +286,145 @@ class ReviewerNode:
             logger.warning("citation alignment check failed", error=str(e))
             return []
 
-    def _verify_claim_source_support(
+    def _audit_claim_source_support(
         self,
         section_id: str,
         content: str,
         bindings: list[ClaimEvidenceBinding],
-    ) -> list[ReviewIssue]:
+    ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
         section_bindings = [binding for binding in bindings if binding.section_id == section_id]
-        if not section_bindings:
-            return []
-
-        cited_numbers = {int(m) for m in CITATION_PATTERN.findall(content)}
-        bound_numbers = {binding.citation_number for binding in section_bindings}
         issues: list[ReviewIssue] = []
+        quality_issues: list[QualityIssue] = []
+        claims = self.claim_extractor.extract_factual_claims(content)
 
-        for citation_number in sorted(cited_numbers - bound_numbers):
-            issues.append(
-                ReviewIssue(
-                    type="citation_mismatch",
-                    description=f"Citation [{citation_number}] is not bound to evidence.",
-                    suggestion="Bind the cited claim to an evidence packet before approval.",
-                    location=f"[{citation_number}]",
+        bindings_by_citation: dict[int, list[ClaimEvidenceBinding]] = {}
+        for binding in section_bindings:
+            bindings_by_citation.setdefault(binding.citation_number, []).append(binding)
+
+        for claim in claims:
+            if not claim.citation_numbers:
+                issue = ReviewIssue(
+                    type="missing_citation",
+                    description=f"Factual claim lacks citation: {claim.text}",
+                    suggestion="Add a valid citation backed by an evidence packet or revise it.",
+                    location=claim.text[:80],
                 )
-            )
+                issues.append(issue)
+                quality_issues.append(
+                    self._claim_quality_issue("UNSUPPORTED_CLAIM", issue, section_id, claim)
+                )
+                continue
+
+            for citation_number in claim.citation_numbers:
+                citation_bindings = [
+                    binding
+                    for binding in bindings_by_citation.get(citation_number, [])
+                    if self._binding_matches_claim(binding, claim)
+                ]
+                if not citation_bindings:
+                    issue = ReviewIssue(
+                        type="citation_mismatch",
+                        description=(
+                            f"Citation [{citation_number}] is not bound to an evidence packet: "
+                            f"{claim.text}"
+                        ),
+                        suggestion="Bind the cited claim to an evidence packet before approval.",
+                        location=f"[{citation_number}]",
+                    )
+                    issues.append(issue)
+                    quality_issues.append(
+                        self._claim_quality_issue(
+                            "CLAIM_MISSING_EVIDENCE_PACKET", issue, section_id, claim
+                        )
+                    )
+                    continue
+
+                best_binding = max(
+                    citation_bindings,
+                    key=lambda binding: (
+                        binding.verdict == "supported",
+                        bool(binding.chunk_id),
+                        binding.support_score,
+                    ),
+                )
+                if best_binding.verdict == "supported" and best_binding.chunk_id:
+                    continue
+                issue = self._unsupported_binding_issue(best_binding)
+                issues.append(issue)
+                quality_issues.append(
+                    self._claim_quality_issue("UNSUPPORTED_CLAIM", issue, section_id, claim)
+                )
 
         for binding in section_bindings:
-            if binding.verdict == "supported":
+            if binding.verdict == "supported" and binding.chunk_id:
                 continue
-            issues.append(
-                ReviewIssue(
-                    type="citation_mismatch",
-                    description=(
-                        f"Claim-source support is {binding.verdict} for citation "
-                        f"[{binding.citation_number}]: {binding.claim_text}"
+            if any(
+                binding.citation_number in claim.citation_numbers
+                for claim in claims
+            ):
+                continue
+            issue = self._unsupported_binding_issue(binding)
+            issues.append(issue)
+            quality_issues.append(
+                self._claim_quality_issue(
+                    "UNSUPPORTED_CLAIM",
+                    issue,
+                    section_id,
+                    ExtractedClaim(
+                        text=binding.claim_text,
+                        citation_numbers=(binding.citation_number,),
+                        is_factual=True,
                     ),
-                    suggestion=(
-                        "Replace the citation with a better-supported source, add a more "
-                        "specific evidence packet, or revise the claim."
-                    ),
-                    location=f"[{binding.citation_number}]",
                 )
             )
 
-        return issues
+        return issues, quality_issues
+
+    def _unsupported_binding_issue(self, binding: ClaimEvidenceBinding) -> ReviewIssue:
+        return ReviewIssue(
+            type="citation_mismatch",
+            description=(
+                f"Claim-source support is {binding.verdict} for citation "
+                f"[{binding.citation_number}]: {binding.claim_text}"
+            ),
+            suggestion=(
+                "Replace the citation with a better-supported source, add a more "
+                "specific evidence packet, or revise the claim."
+            ),
+            location=f"[{binding.citation_number}]",
+        )
+
+    def _binding_matches_claim(
+        self, binding: ClaimEvidenceBinding, claim: ExtractedClaim
+    ) -> bool:
+        binding_text = self._normalize_claim_text(binding.claim_text)
+        claim_text = self._normalize_claim_text(claim.text)
+        if not binding_text or not claim_text:
+            return False
+        if binding_text == claim_text or binding_text in claim_text or claim_text in binding_text:
+            return True
+        similarity = SequenceMatcher(None, binding_text, claim_text).ratio()
+        return similarity >= _CLAIM_TEXT_MATCH_THRESHOLD
+
+    def _normalize_claim_text(self, text: str) -> str:
+        text_without_citations = CITATION_PATTERN.sub("", text)
+        return " ".join(text_without_citations.casefold().split())
+
+    def _claim_quality_issue(
+        self, code: str, review_issue: ReviewIssue, section_id: str, claim: ExtractedClaim
+    ) -> QualityIssue:
+        return QualityIssue(
+            code=code,
+            message=review_issue.description,
+            severity="error",
+            location=review_issue.location or section_id,
+            blocking=False,
+            details={
+                "section_id": section_id,
+                "claim_text": claim.text,
+                "citation_numbers": list(claim.citation_numbers),
+            },
+        )
 
     async def _handle_approved(
         self, state: AgentState, section: Any, review: ReviewResult, record: dict[str, Any]
@@ -353,7 +456,12 @@ class ReviewerNode:
         }
 
     async def _handle_rejected(
-        self, state: AgentState, section: Any, review: ReviewResult, record: dict[str, Any]
+        self,
+        state: AgentState,
+        section: Any,
+        review: ReviewResult,
+        record: dict[str, Any],
+        quality_issues: list[QualityIssue] | None = None,
     ) -> dict[str, Any]:
         sections = state["sections"]
         index = state["current_section_index"]
@@ -403,14 +511,15 @@ class ReviewerNode:
                 },
             )
 
-            return {
+            result: dict[str, Any] = {
                 "sections": updated,
                 "review_history": [record],
                 "current_review": review.model_dump(),
-                "quality_issues": [quality_issue],
+                "quality_issues": [quality_issue, *(quality_issues or [])],
                 "status": "waiting_human",
                 "error_message": quality_issue.message,
             }
+            return result
 
         next_section_revision_count = section_revision_count + 1
         comments = [
@@ -432,10 +541,13 @@ class ReviewerNode:
             }
         )
 
-        return {
+        result = {
             "sections": updated,
             "review_history": [record],
             "current_review": review.model_dump(),
             "revision_count": total_revision_count + 1,
             "status": "writing",
         }
+        if quality_issues:
+            result["quality_issues"] = quality_issues
+        return result

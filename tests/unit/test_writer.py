@@ -520,6 +520,21 @@ async def test_writer_returns_evidence_packets_and_claim_bindings(
     assert binding.verdict == "supported"
 
 
+def test_citation_binder_extracts_multiple_cited_factual_claims(mock_llm, mock_prompts):
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+
+    claims = node.citation_binder._extract_cited_claims(
+        "Prior work shows attention improves sequence modeling [1]. "
+        "This section explains the background. "
+        "Experiments indicate better scaling [2]."
+    )
+
+    assert claims == [
+        "Prior work shows attention improves sequence modeling [1].",
+        "Experiments indicate better scaling [2].",
+    ]
+
+
 def test_writer_build_rag_context_formats_evidence_packet(mock_llm, mock_prompts):
     packet = EvidencePacket(
         chunk_id="packet-1",

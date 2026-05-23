@@ -398,6 +398,16 @@ async def test_reviewer_citation_alignment_issues_added(mock_llm, mock_prompts, 
         {
             **_make_state_with_written_section(base_state, sections, index=0),
             "papers": papers,
+            "claim_evidence_bindings": [
+                ClaimEvidenceBinding(
+                    section_id=sections[0].section_id,
+                    claim_text="The model in [1] is widely used.",
+                    citation_number=1,
+                    chunk_id="c1",
+                    support_score=0.8,
+                    verdict="supported",
+                )
+            ],
         },
     )
 
@@ -459,6 +469,16 @@ async def test_reviewer_citation_alignment_empty_issues_no_effect(
         {
             **_make_state_with_written_section(base_state, sections, index=0),
             "papers": papers,
+            "claim_evidence_bindings": [
+                ClaimEvidenceBinding(
+                    section_id=sections[0].section_id,
+                    claim_text="We follow [1].",
+                    citation_number=1,
+                    chunk_id="c1",
+                    support_score=0.8,
+                    verdict="supported",
+                )
+            ],
         },
     )
 
@@ -647,3 +667,117 @@ async def test_reviewer_accepts_supported_claim_source_binding(
 
     assert result["status"] == "completed"
     assert result["sections"][0].status == "approved"
+
+
+@pytest.mark.asyncio
+async def test_reviewer_rejects_uncited_factual_claim_with_quality_issue(
+    mock_llm, mock_prompts, base_state
+):
+    section = _written_section(
+        "Results",
+        content="The model improves accuracy by 12%. This section summarizes implications.",
+        index=0,
+    )
+    state = _make_state_with_written_section(base_state, [section], index=0)
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "writing"
+    assert result["current_review"]["approved"] is False
+    assert result["current_review"]["issues"][0]["type"] == "missing_citation"
+    assert result["quality_issues"][0].code == "UNSUPPORTED_CLAIM"
+    assert result["quality_issues"][0].details["citation_numbers"] == []
+
+
+@pytest.mark.asyncio
+async def test_reviewer_rejects_cited_claim_without_evidence_packet_quality_issue(
+    mock_llm, mock_prompts, base_state
+):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="Evidence Paper",
+            authors=["Author"],
+            abstract="Evidence abstract.",
+            source="openalex",
+        )
+    ]
+    section = _written_section(
+        "Results",
+        content="Prior work shows attention improves sequence modeling [1].",
+        index=0,
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "papers": papers,
+            "claim_evidence_bindings": [],
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "writing"
+    assert result["current_review"]["approved"] is False
+    assert result["current_review"]["issues"][0]["type"] == "citation_mismatch"
+    assert result["quality_issues"][0].code == "CLAIM_MISSING_EVIDENCE_PACKET"
+
+
+@pytest.mark.asyncio
+async def test_reviewer_rejects_stale_binding_for_different_claim(
+    mock_llm, mock_prompts, base_state
+):
+    section = _written_section(
+        "Results",
+        content="Prior work shows attention improves sequence modeling [1].",
+        index=0,
+    )
+    stale_binding = ClaimEvidenceBinding(
+        section_id=section.section_id,
+        claim_text="A different old claim is supported [1].",
+        citation_number=1,
+        chunk_id="old-chunk",
+        support_score=0.9,
+        verdict="supported",
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "papers": [
+                PaperMetadata(
+                    paper_id="p1",
+                    title="Evidence Paper",
+                    authors=["Author"],
+                    abstract="Evidence abstract.",
+                    source="openalex",
+                )
+            ],
+            "claim_evidence_bindings": [stale_binding],
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "writing"
+    assert result["current_review"]["approved"] is False
+    assert result["quality_issues"][0].code == "CLAIM_MISSING_EVIDENCE_PACKET"
