@@ -1,6 +1,13 @@
 import pytest
 from seele_scholar_agent.nodes.outline_quality_gate import OutlineQualityGateNode
-from seele_scholar_agent.state import OutlineStructure, SectionEvidencePlan, SectionOutline
+from seele_scholar_agent.state import (
+    MaterialRegistry,
+    MaterialRegistryEntry,
+    OutlineStructure,
+    PaperMetadata,
+    SectionEvidencePlan,
+    SectionOutline,
+)
 
 
 def _section(
@@ -126,3 +133,118 @@ async def test_outline_quality_gate_blocks_imrad_for_non_empirical_type(base_sta
 
     assert result["status"] == "waiting_human"
     assert result["quality_issues"][0].code == "OUTLINE_EXPERIMENTAL_TEMPLATE_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_outline_quality_gate_blocks_required_material_not_planned(base_state):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="Required Paper",
+            authors=["Author"],
+            abstract="Abstract.",
+            relevance_score=0.8,
+        )
+    ]
+    registry = MaterialRegistry(entries=[MaterialRegistryEntry(paper_id="p1", required=True)])
+    section = _section(key_sources=[], citation_plan=[])
+
+    result = await OutlineQualityGateNode().check(
+        {
+            **base_state,
+            "outline": _outline([section]),
+            "papers": papers,
+            "material_registry": registry,
+        }
+    )
+
+    codes = {issue.code for issue in result["quality_issues"]}
+    assert result["status"] == "waiting_human"
+    assert "REQUIRED_MATERIAL_NOT_PLANNED" in codes
+
+
+@pytest.mark.asyncio
+async def test_outline_quality_gate_blocks_non_citable_material_planned(base_state):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="Background Paper",
+            authors=["Author"],
+            abstract="Abstract.",
+            relevance_score=0.8,
+        )
+    ]
+    registry = MaterialRegistry(
+        entries=[MaterialRegistryEntry(paper_id="p1", citation_role="background")]
+    )
+    section = _section(citation_plan=["Use [1] for a claim."])
+
+    result = await OutlineQualityGateNode().check(
+        {
+            **base_state,
+            "outline": _outline([section]),
+            "papers": papers,
+            "material_registry": registry,
+        }
+    )
+
+    assert result["status"] == "waiting_human"
+    assert result["quality_issues"][0].code == "OUTLINE_CITES_NON_CITABLE_MATERIAL"
+
+
+@pytest.mark.asyncio
+async def test_outline_quality_gate_skips_required_material_relevance_by_default(base_state):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="Required Paper",
+            authors=["Author"],
+            abstract="Abstract.",
+            relevance_score=0.05,
+            query_overlap_score=0.0,
+        )
+    ]
+    registry = MaterialRegistry(entries=[MaterialRegistryEntry(paper_id="p1", required=True)])
+    section = _section(citation_plan=["Use [1] for a claim."])
+
+    result = await OutlineQualityGateNode().check(
+        {
+            **base_state,
+            "outline": _outline([section]),
+            "papers": papers,
+            "material_registry": registry,
+        }
+    )
+
+    assert result["quality_issues"] == []
+
+
+@pytest.mark.asyncio
+async def test_outline_quality_gate_warns_required_material_low_relevance_when_enabled(
+    base_state,
+):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="Required Paper",
+            authors=["Author"],
+            abstract="Abstract.",
+            relevance_score=0.05,
+            query_overlap_score=0.0,
+        )
+    ]
+    registry = MaterialRegistry(entries=[MaterialRegistryEntry(paper_id="p1", required=True)])
+    section = _section(citation_plan=["Use [1] for a claim."])
+
+    result = await OutlineQualityGateNode().check(
+        {
+            **base_state,
+            "outline": _outline([section]),
+            "papers": papers,
+            "material_registry": registry,
+            "check_required_material_relevance": True,
+        }
+    )
+
+    assert result["quality_issues"][0].code == "REQUIRED_MATERIAL_LOW_RELEVANCE"
+    assert result["quality_issues"][0].blocking is False

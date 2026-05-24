@@ -23,6 +23,21 @@ class PaperMetadata(BaseModel):
     source: Literal["arxiv", "semantic_scholar", "openalex", "user_library"] = "openalex"
 
 
+class MaterialRegistryEntry(BaseModel):
+    paper_id: str | None = None
+    title: str | None = None
+    doi: str | None = None
+    source_origin: Literal["user_upload", "external_search", "unknown"] = "unknown"
+    citation_role: Literal["citable", "background", "excluded"] = "citable"
+    confidence: Literal["trusted", "normal", "low"] = "normal"
+    required: bool = False
+    notes: str = ""
+
+
+class MaterialRegistry(BaseModel):
+    entries: list[MaterialRegistryEntry] = Field(default_factory=list)
+
+
 class ProposedTopic(BaseModel):
     title: str
     description: str
@@ -165,6 +180,8 @@ class AgentState(TypedDict):
     structure_pattern: NotRequired[str]
     target_word_count: NotRequired[int]
     strict_academic_mode: NotRequired[bool]
+    check_required_material_relevance: NotRequired[bool]
+    material_registry: NotRequired[MaterialRegistry]
     broad_papers: list[PaperMetadata]
     proposed_topics: list[ProposedTopic]
     language: Literal["zh", "en", "ja"]

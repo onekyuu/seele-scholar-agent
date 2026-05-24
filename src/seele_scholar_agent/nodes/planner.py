@@ -17,6 +17,11 @@ from ..state import (
     SectionOutline,
 )
 from . import NodeStreamEvent, _stream_llm_text, invoke_with_retry
+from .material_registry import (
+    annotate_paper_summaries,
+    get_material_registry,
+    material_policy_suffix,
+)
 
 logger = get_logger(__name__)
 
@@ -42,7 +47,7 @@ class PlannerNode:
         lang = state.get("language", "zh")
         papers = state.get("papers", [])
         paper_summaries: list[str] = state.get("paper_summaries") or []
-        papers_summary = self._build_papers_summary(papers, paper_summaries, lang)
+        papers_summary = self._build_papers_summary(papers, paper_summaries, lang, state)
         paper_type = str(state.get("paper_type", "auto"))
         structure_pattern = str(state.get("structure_pattern", "auto"))
         target_word_count = str(state.get("target_word_count", "auto"))
@@ -104,7 +109,7 @@ class PlannerNode:
 
         input_data = {
             "topic": topic,
-            "papers_summary": self._build_papers_summary(papers, paper_summaries, lang),
+            "papers_summary": self._build_papers_summary(papers, paper_summaries, lang, state),
             "language": t(lang, "language_name"),
             "language_title": t(lang, "language_title"),
             "title_placeholder": t(lang, "language_title"),
@@ -180,10 +185,15 @@ class PlannerNode:
         }
 
     def _build_papers_summary(
-        self, papers: list[PaperMetadata], paper_summaries: list[str], lang: str
+        self,
+        papers: list[PaperMetadata],
+        paper_summaries: list[str],
+        lang: str,
+        state: AgentState | None = None,
     ) -> str:
         if paper_summaries:
-            return "\n".join(paper_summaries[:15])
+            registry = get_material_registry(state) if state is not None else None
+            return "\n".join(annotate_paper_summaries(paper_summaries, papers, registry)[:15])
         if not papers:
             return t(lang, "no_papers_found")
 
@@ -203,7 +213,8 @@ class PlannerNode:
             ]
             if abstract:
                 parts.append(f"summary: {abstract}")
-            lines.append("; ".join(parts))
+            registry = get_material_registry(state) if state is not None else None
+            lines.append("; ".join(parts) + material_policy_suffix(paper, registry))
         return "\n".join(lines)
 
     def _build_outline(

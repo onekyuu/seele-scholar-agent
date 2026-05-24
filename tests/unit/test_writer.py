@@ -7,7 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 from seele_scholar_agent.nodes.writer import WriterNode
-from seele_scholar_agent.state import AgentState, DocumentChunk, EvidencePacket, SectionDraft
+from seele_scholar_agent.state import (
+    AgentState,
+    DocumentChunk,
+    EvidencePacket,
+    MaterialRegistry,
+    MaterialRegistryEntry,
+    SectionDraft,
+)
 
 # ---------------------------------------------------------------------------
 # W-01: Normal write → sections[0].content filled, status="reviewing"
@@ -554,6 +561,19 @@ def test_writer_build_rag_context_formats_evidence_packet(mock_llm, mock_prompts
     assert "[chunk_id:packet-1]" in result
     assert "title: Evidence Paper" in result
     assert "quote: Evidence quote." in result
+
+
+def test_writer_numbered_papers_include_material_policy(mock_llm, mock_prompts, sample_papers):
+    registry = MaterialRegistry(
+        entries=[MaterialRegistryEntry(paper_id=sample_papers[0].paper_id, required=True)]
+    )
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+
+    result = node._build_numbered_papers(
+        [sample_papers[0]], {"material_registry": registry}  # type: ignore[arg-type]
+    )
+
+    assert "required_by_user=true" in result
 
 
 # ---------------------------------------------------------------------------
