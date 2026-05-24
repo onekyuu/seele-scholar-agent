@@ -29,12 +29,24 @@ def _topic_proposer_response() -> str:
 def _planner_response(sections: list[dict] | None = None) -> str:
     if sections is None:
         sections = [{"title": "Introduction", "description": "Intro", "order": 1, "key_points": []}]
+    for index, section in enumerate(sections):
+        section.setdefault("purpose", f"Purpose for {section['title']}.")
+        section.setdefault("content_summary", f"Summary for {section['title']}.")
+        section.setdefault("target_claims", [f"Claim for {section['title']}."])
+        section.setdefault("key_sources", ["[1] Source"])
+        section.setdefault("citation_plan", ["Use [1] to support the claim."])
+        section.setdefault(
+            "transition_to_next",
+            "" if index == len(sections) - 1 else "Move to the next section.",
+        )
     return json.dumps(
         {
             "title": "Test Paper",
             "abstract": "Abstract.",
             "sections": sections,
             "keywords": ["test"],
+            "paper_type": "literature_review",
+            "structure_pattern": "thematic_review",
         }
     )
 
