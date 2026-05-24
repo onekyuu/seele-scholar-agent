@@ -13,6 +13,7 @@ from seele_scholar_agent.state import (
     ReviewResult,
     SectionDraft,
     SectionOutline,
+    SectionStyleGuidance,
 )
 
 
@@ -115,6 +116,16 @@ def test_section_outline_key_points_default():
     assert s.target_claims == []
     assert s.key_sources == []
     assert s.evidence_gaps == []
+    assert s.section_style == SectionStyleGuidance()
+
+
+def test_section_style_guidance_defaults():
+    style = SectionStyleGuidance()
+    assert style.argument_mode == ""
+    assert style.sentence_style == ""
+    assert style.transition_style == ""
+    assert style.forbidden_patterns == []
+    assert style.style_reference_ids == []
 
 
 def test_quality_issue_defaults():

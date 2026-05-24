@@ -15,7 +15,9 @@ from ..state import (
     EvidencePacket,
     PaperMetadata,
     SectionDraft,
+    SectionOutline,
 )
+from ..style_packs import build_writer_style_context
 from . import (
     CITATION_PATTERN,
     PREVIOUS_SECTION_MAX_CHARS,
@@ -288,6 +290,8 @@ class WriterNode:
         rag_context = self._build_rag_context(evidence_packets)
 
         outline_json = self._build_outline_json(state.get("outline"))
+        section_outline = self._find_section_outline(state, section)
+        style_guidance = build_writer_style_context(state, section_outline)
         review_comments = self._build_review_comments(section)
 
         section_summaries: list[str] = list(state.get("section_summaries") or [])
@@ -312,6 +316,7 @@ class WriterNode:
                     previous_sections,
                     numbered_papers,
                     rag_context,
+                    style_guidance,
                     review_comments,
                 )
             )
@@ -401,6 +406,9 @@ class WriterNode:
                 else self._build_numbered_papers(state.get("papers", []), state)
             ),
             "rag_context": rag_context,
+            "style_guidance": build_writer_style_context(
+                state, self._find_section_outline(state, section)
+            ),
             "review_comments": self._build_review_comments(section),
         }
 
@@ -448,6 +456,7 @@ class WriterNode:
         previous_sections: str,
         numbered_papers: str,
         rag_context: str,
+        style_guidance: str,
         review_comments: str,
     ) -> dict[str, Any]:
         return {
@@ -460,8 +469,24 @@ class WriterNode:
             "previous_sections": previous_sections,
             "numbered_papers": numbered_papers,
             "rag_context": rag_context,
+            "style_guidance": style_guidance,
             "review_comments": review_comments,
         }
+
+    def _find_section_outline(
+        self, state: AgentState, section: SectionDraft
+    ) -> SectionOutline | None:
+        outline = state.get("outline")
+        if outline is None:
+            return None
+        return next(
+            (
+                section_outline
+                for section_outline in outline.sections
+                if section_outline.title == section.title
+            ),
+            None,
+        )
 
     async def _collect_evidence_packets(
         self, state: AgentState, section: SectionDraft
@@ -551,6 +576,19 @@ class WriterNode:
             transition = getattr(s, "transition_to_next", "")
             if transition:
                 lines.append(f"  Transition: {transition}")
+            section_style = getattr(s, "section_style", None)
+            if section_style is not None:
+                if section_style.argument_mode:
+                    lines.append(f"  Argument mode: {section_style.argument_mode}")
+                if section_style.sentence_style:
+                    lines.append(f"  Sentence style: {section_style.sentence_style}")
+                if section_style.transition_style:
+                    lines.append(f"  Transition style: {section_style.transition_style}")
+                if section_style.forbidden_patterns:
+                    lines.append(
+                        "  Forbidden patterns: "
+                        + "; ".join(section_style.forbidden_patterns)
+                    )
         return "\n".join(lines)
 
     def _build_rag_context(self, rag_context: Any) -> str:

@@ -437,6 +437,13 @@ async def test_planner_preserves_structure_and_section_strategy(
                 "citation_plan": ["Use [1] to ground Transformer architecture."],
                 "evidence_gaps": ["Need a recent evaluation survey."],
                 "transition_to_next": "Moves from definitions to prior evaluation frameworks.",
+                "section_style": {
+                    "argument_mode": "Synthesize themes instead of listing papers.",
+                    "sentence_style": "Dense but readable academic prose.",
+                    "transition_style": "Move by conceptual contrast.",
+                    "forbidden_patterns": ["IMRaD boilerplate"],
+                    "style_reference_ids": ["zh_academic_review_1"],
+                },
             }
         ],
     )
@@ -482,6 +489,9 @@ async def test_planner_preserves_structure_and_section_strategy(
     assert section.key_sources == ["[1] Attention Is All You Need"]
     assert section.evidence_gaps == ["Need a recent evaluation survey."]
     assert section.transition_to_next.startswith("Moves from")
+    assert section.section_style.argument_mode == "Synthesize themes instead of listing papers."
+    assert section.section_style.forbidden_patterns == ["IMRaD boilerplate"]
+    assert section.section_style.style_reference_ids == ["zh_academic_review_1"]
 
 
 # ---------------------------------------------------------------------------
@@ -561,3 +571,4 @@ async def test_planner_prompt_uses_paper_summaries_and_structure_controls(
     assert captured_input["paper_type"] == "theoretical"
     assert captured_input["structure_pattern"] == "theoretical_analysis"
     assert captured_input["target_word_count"] == "6000"
+    assert "Writing locale: zh-CN" in captured_input["style_guidance"]

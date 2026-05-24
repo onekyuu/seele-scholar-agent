@@ -21,6 +21,7 @@ from ..state import (
 )
 from . import CITATION_PATTERN, NodeStreamEvent, _stream_llm_text, invoke_with_retry
 from .claim_audit import ExtractedClaim, RuleBasedClaimExtractor
+from .language_style_audit import LanguageStyleAudit, LanguageStyleFinding
 from .methodology_audit import MethodologyAudit, MethodologyAuditFinding
 from .paragraph_quality_audit import ParagraphQualityAudit, ParagraphQualityFinding
 
@@ -65,6 +66,7 @@ class ReviewerNode:
         self.claim_extractor = RuleBasedClaimExtractor()
         self.methodology_audit = MethodologyAudit()
         self.paragraph_quality_audit = ParagraphQualityAudit()
+        self.language_style_audit = LanguageStyleAudit()
 
     async def review(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]
@@ -154,6 +156,17 @@ class ReviewerNode:
         quality_issues = [*quality_issues, *paragraph_quality_issues]
         if paragraph_issues:
             review.issues.extend(paragraph_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
+
+        language_style_issues, language_style_quality_issues = self._audit_language_style(
+            section.section_id,
+            section.content,
+            state,
+        )
+        quality_issues = [*quality_issues, *language_style_quality_issues]
+        if language_style_issues:
+            review.issues.extend(language_style_issues)
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
@@ -263,6 +276,17 @@ class ReviewerNode:
         quality_issues = [*quality_issues, *paragraph_quality_issues]
         if paragraph_issues:
             review.issues.extend(paragraph_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
+
+        language_style_issues, language_style_quality_issues = self._audit_language_style(
+            section.section_id,
+            section.content,
+            state,
+        )
+        quality_issues = [*quality_issues, *language_style_quality_issues]
+        if language_style_issues:
+            review.issues.extend(language_style_issues)
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
@@ -513,6 +537,39 @@ class ReviewerNode:
 
     def _paragraph_quality_issue(
         self, finding: ParagraphQualityFinding, section_id: str
+    ) -> QualityIssue:
+        return QualityIssue(
+            code=finding.code,
+            message=finding.description,
+            severity="error",
+            location=finding.location,
+            blocking=False,
+            details={"section_id": section_id},
+        )
+
+    def _audit_language_style(
+        self,
+        section_id: str,
+        content: str,
+        state: AgentState,
+    ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
+        findings = self.language_style_audit.audit(content, state)
+        review_issues = [self._language_style_review_issue(finding) for finding in findings]
+        quality_issues = [
+            self._language_style_quality_issue(finding, section_id) for finding in findings
+        ]
+        return review_issues, quality_issues
+
+    def _language_style_review_issue(self, finding: LanguageStyleFinding) -> ReviewIssue:
+        return ReviewIssue(
+            type=finding.review_type,
+            description=finding.description,
+            suggestion=finding.suggestion,
+            location=finding.location,
+        )
+
+    def _language_style_quality_issue(
+        self, finding: LanguageStyleFinding, section_id: str
     ) -> QualityIssue:
         return QualityIssue(
             code=finding.code,

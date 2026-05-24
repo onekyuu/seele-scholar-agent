@@ -33,6 +33,9 @@ PLANNER_USER_PROMPT = """研究主题：{topic}
 结构模式：{structure_pattern}
 目标字数：{target_word_count}
 
+语言与文体指导：
+{style_guidance}
+
 检索到的相关文献：
 {papers_summary}
 
@@ -57,6 +60,13 @@ PLANNER_USER_PROMPT = """研究主题：{topic}
             "citation_plan": ["用[1]支撑背景定义", "用[2]对比方法差异"],
             "evidence_gaps": ["仍缺少的证据或需要后续检索的问题"],
             "transition_to_next": "本节如何过渡到下一节",
+            "section_style": {{
+                "argument_mode": "本节在目标语言下的论证方式",
+                "sentence_style": "推荐句式风格",
+                "transition_style": "过渡方式",
+                "forbidden_patterns": ["禁止套用的外语模板或表达"],
+                "style_reference_ids": ["可参考的风格示例ID"]
+            }},
             "suggested_figures": ["折线图：展示模型在不同数据集上的准确率对比", "表格：各方法的时间复杂度与空间复杂度对比"]
         }}
     ],
@@ -109,6 +119,9 @@ WRITER_USER_PROMPT = """论文主题：{topic}
 
 相关文献证据包（每段包含 chunk_id、标题、作者、年份、页码、相关性说明和 quote；引用事实性主张时应绑定具体 chunk_id）：
 {rag_context}
+
+语言与文体指导：
+{style_guidance}
 
 历史审稿意见：
 {review_comments}

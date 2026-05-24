@@ -23,7 +23,9 @@ from .state import (
     PaperMetadata,
     QualityIssue,
     SectionDraft,
+    SectionStyleGuidance,
 )
+from .style_packs import LocaleStylePack, StyleReference
 
 __version__ = "0.11.2"
 
@@ -51,6 +53,9 @@ __all__ = [
     "MaterialRegistryEntry",
     "OutlineStructure",
     "SectionDraft",
+    "SectionStyleGuidance",
+    "LocaleStylePack",
+    "StyleReference",
     "RAGRetrieverFunc",
     "PaperSearchFunc",
     "QualityMetrics",
