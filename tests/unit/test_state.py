@@ -3,6 +3,8 @@ from pydantic import ValidationError
 from seele_scholar_agent.state import (
     ClaimEvidenceBinding,
     EvidencePacket,
+    MaterialRegistry,
+    MaterialRegistryEntry,
     OutlineStructure,
     PaperMetadata,
     QualityIssue,
@@ -31,6 +33,15 @@ def test_paper_metadata_defaults():
 def test_paper_metadata_invalid_source():
     with pytest.raises(ValidationError):
         PaperMetadata(paper_id="p1", title="T", authors=[], abstract="", source="github")  # type: ignore[arg-type]
+
+
+def test_material_registry_entry_defaults():
+    entry = MaterialRegistryEntry(paper_id="p1")
+    registry = MaterialRegistry(entries=[entry])
+
+    assert registry.entries[0].citation_role == "citable"
+    assert registry.entries[0].confidence == "normal"
+    assert registry.entries[0].required is False
 
 
 def test_section_draft_defaults():

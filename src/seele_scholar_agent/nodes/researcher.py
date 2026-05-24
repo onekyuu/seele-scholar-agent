@@ -21,6 +21,11 @@ from . import (
     PAPER_SUMMARY_ABSTRACT_CHARS,
     NodeStreamEvent,
 )
+from .material_registry import (
+    apply_material_registry_priority,
+    get_material_registry,
+    material_policy_suffix,
+)
 
 logger = get_logger(__name__)
 
@@ -175,7 +180,9 @@ def _fallback_query_variants(topic: str) -> list[str]:
     return list(dict.fromkeys(v for v in variants if v))
 
 
-def _compress_papers(papers: list[PaperMetadata]) -> tuple[list[PaperMetadata], list[str]]:
+def _compress_papers(
+    papers: list[PaperMetadata], registry: Any | None = None
+) -> tuple[list[PaperMetadata], list[str]]:
     """Strip full abstracts from PaperMetadata (reduces state size) and build compact summaries.
 
     Returns:
@@ -204,7 +211,10 @@ def _compress_papers(papers: list[PaperMetadata]) -> tuple[list[PaperMetadata], 
         else:
             snippet = abstract
 
-        summaries.append(f"[{idx}] {p.title} — {authors_str}. {snippet}")
+        summaries.append(
+            f"[{idx}] {p.title} — {authors_str}. {snippet}"
+            f"{material_policy_suffix(p, registry)}"
+        )
 
     return stripped, summaries
 
@@ -614,9 +624,12 @@ class ResearcherNode:
 
         queries = await self._translate_topic(topic)
         all_papers = await self._search_queries(queries)
+        all_papers = apply_material_registry_priority(all_papers, get_material_registry(state))
         ranked_papers = _dedupe_and_rank_papers(all_papers, queries)
 
-        stripped_papers, paper_summaries = _compress_papers(ranked_papers)
+        stripped_papers, paper_summaries = _compress_papers(
+            ranked_papers, get_material_registry(state)
+        )
 
         logger.info(
             "research complete",
@@ -646,8 +659,11 @@ class ResearcherNode:
             query_papers = await self._search_single_query(query)
             all_papers.extend(query_papers)
 
+        all_papers = apply_material_registry_priority(all_papers, get_material_registry(state))
         ranked_papers = _dedupe_and_rank_papers(all_papers, queries)
-        stripped_papers, paper_summaries = _compress_papers(ranked_papers)
+        stripped_papers, paper_summaries = _compress_papers(
+            ranked_papers, get_material_registry(state)
+        )
 
         yield NodeStreamEvent(
             type="result",

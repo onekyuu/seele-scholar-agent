@@ -25,6 +25,11 @@ from . import (
     invoke_with_retry,
 )
 from .claim_audit import RuleBasedClaimExtractor
+from .material_registry import (
+    annotate_paper_summaries,
+    get_material_registry,
+    material_policy_suffix,
+)
 
 logger = get_logger(__name__)
 
@@ -292,9 +297,9 @@ class WriterNode:
 
         paper_summaries: list[str] = state.get("paper_summaries") or []
         numbered_papers = (
-            self._build_numbered_papers_from_summaries(paper_summaries)
+            self._build_numbered_papers_from_summaries(paper_summaries, state)
             if paper_summaries
-            else self._build_numbered_papers(state.get("papers", []))
+            else self._build_numbered_papers(state.get("papers", []), state)
         )
 
         try:
@@ -391,9 +396,9 @@ class WriterNode:
                 sections, current_index, _section_summaries
             ),
             "numbered_papers": (
-                self._build_numbered_papers_from_summaries(_paper_summaries)
+                self._build_numbered_papers_from_summaries(_paper_summaries, state)
                 if _paper_summaries
-                else self._build_numbered_papers(state.get("papers", []))
+                else self._build_numbered_papers(state.get("papers", []), state)
             ),
             "rag_context": rag_context,
             "review_comments": self._build_review_comments(section),
@@ -610,7 +615,9 @@ class WriterNode:
             parts.append(f"[{s.title}]\n{snippet}")
         return "\n\n".join(parts)
 
-    def _build_numbered_papers(self, papers: list[PaperMetadata]) -> str:
+    def _build_numbered_papers(
+        self, papers: list[PaperMetadata], state: AgentState | None = None
+    ) -> str:
         if not papers:
             return "无"
         lines = []
@@ -619,14 +626,22 @@ class WriterNode:
             if len(p.authors) > 3:
                 authors_str += " et al."
             abstract_snippet = p.abstract[:150] + "..." if len(p.abstract) > 150 else p.abstract
-            lines.append(f"[{i}] {p.title} — {authors_str}. {abstract_snippet}")
+            registry = get_material_registry(state) if state is not None else None
+            lines.append(
+                f"[{i}] {p.title} — {authors_str}. {abstract_snippet}"
+                f"{material_policy_suffix(p, registry)}"
+            )
         return "\n".join(lines)
 
-    def _build_numbered_papers_from_summaries(self, paper_summaries: list[str]) -> str:
+    def _build_numbered_papers_from_summaries(
+        self, paper_summaries: list[str], state: AgentState | None = None
+    ) -> str:
         """Use pre-built compact paper summaries from ResearcherNode (no abstract duplication)."""
         if not paper_summaries:
             return "无"
-        return "\n".join(paper_summaries)
+        registry = get_material_registry(state) if state is not None else None
+        papers = state.get("papers", []) if state is not None else []
+        return "\n".join(annotate_paper_summaries(paper_summaries, papers, registry))
 
     async def _move_to_next(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]

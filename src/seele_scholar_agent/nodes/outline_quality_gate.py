@@ -3,7 +3,14 @@ from typing import Any
 
 from ..logging import get_logger
 from ..state import AgentState, OutlineStructure, QualityIssue, SectionEvidencePlan, SectionOutline
-from . import NodeStreamEvent
+from . import CITATION_PATTERN, NodeStreamEvent
+from .material_registry import (
+    find_material_entry,
+    find_required_entry_number,
+    get_material_registry,
+    material_display_name,
+    required_entries,
+)
 
 logger = get_logger(__name__)
 
@@ -89,6 +96,7 @@ class OutlineQualityGateNode:
         structure_issue = self._structure_fit_issue(outline, state)
         if structure_issue is not None:
             issues.append(structure_issue)
+        issues.extend(self._material_registry_issues(outline, state))
         return issues
 
     def _section_issues(
@@ -220,6 +228,131 @@ class OutlineQualityGateNode:
                 },
             )
         return None
+
+    def _material_registry_issues(
+        self, outline: OutlineStructure, state: AgentState
+    ) -> list[QualityIssue]:
+        registry = get_material_registry(state)
+        if registry is None or not registry.entries:
+            return []
+
+        papers = state.get("papers", [])
+        planned_numbers = self._planned_citation_numbers(outline)
+        issues: list[QualityIssue] = []
+
+        for number in sorted(planned_numbers):
+            if number < 1 or number > len(papers):
+                issues.append(
+                    self._blocking_issue(
+                        "OUTLINE_CITES_UNKNOWN_MATERIAL",
+                        f"Outline evidence plan cites [{number}], but no such paper exists.",
+                        f"[{number}]",
+                    )
+                )
+                continue
+
+            paper = papers[number - 1]
+            entry = find_material_entry(paper, registry)
+            if entry is None:
+                continue
+            if entry.citation_role != "citable":
+                issues.append(
+                    self._blocking_issue(
+                        "OUTLINE_CITES_NON_CITABLE_MATERIAL",
+                        (
+                            f"Outline cites [{number}] '{paper.title}', but the material "
+                            f"is marked as {entry.citation_role}."
+                        ),
+                        f"[{number}]",
+                        details={"paper_id": paper.paper_id, "citation_role": entry.citation_role},
+                    )
+                )
+            elif entry.confidence == "low":
+                issues.append(
+                    QualityIssue(
+                        code="OUTLINE_LOW_CONFIDENCE_MATERIAL",
+                        message=f"Outline plans to cite low-confidence material [{number}].",
+                        severity="warning",
+                        location=f"[{number}]",
+                        blocking=False,
+                        details={"paper_id": paper.paper_id},
+                    )
+                )
+
+        for entry in required_entries(registry):
+            required_number = find_required_entry_number(entry, papers)
+            if required_number is None:
+                issues.append(
+                    self._blocking_issue(
+                        "REQUIRED_MATERIAL_NOT_FOUND",
+                        (
+                            "Required user material was not found in retrieved papers: "
+                            f"{material_display_name(entry)}."
+                        ),
+                        "material_registry",
+                    )
+                )
+                continue
+
+            if entry.citation_role != "citable":
+                issues.append(
+                    self._blocking_issue(
+                        "REQUIRED_MATERIAL_NOT_CITABLE",
+                        (
+                            f"Required material [{required_number}] is marked as "
+                            f"{entry.citation_role}, so it cannot be cited."
+                        ),
+                        f"[{required_number}]",
+                    )
+                )
+                continue
+
+            if required_number not in planned_numbers:
+                issues.append(
+                    self._blocking_issue(
+                        "REQUIRED_MATERIAL_NOT_PLANNED",
+                        (
+                            f"Required user material [{required_number}] is not included "
+                            "in the outline evidence plan."
+                        ),
+                        f"[{required_number}]",
+                    )
+                )
+
+            paper = papers[required_number - 1]
+            if (
+                state.get("check_required_material_relevance", False)
+                and paper.relevance_score < 0.15
+                and paper.query_overlap_score < 0.1
+            ):
+                issues.append(
+                    QualityIssue(
+                        code="REQUIRED_MATERIAL_LOW_RELEVANCE",
+                        message=(
+                            f"Required material [{required_number}] has low relevance "
+                            "signals for the current topic."
+                        ),
+                        severity="warning",
+                        location=f"[{required_number}]",
+                        blocking=False,
+                        details={
+                            "paper_id": paper.paper_id,
+                            "relevance_score": paper.relevance_score,
+                            "query_overlap_score": paper.query_overlap_score,
+                        },
+                    )
+                )
+        return issues
+
+    def _planned_citation_numbers(self, outline: OutlineStructure) -> set[int]:
+        planned_text_parts: list[str] = []
+        for section in outline.sections:
+            planned_text_parts.extend(section.key_sources)
+            planned_text_parts.extend(section.citation_plan)
+        for evidence_plan in outline.evidence_map:
+            planned_text_parts.extend(evidence_plan.key_sources)
+            planned_text_parts.extend(evidence_plan.citation_plan)
+        return {int(number) for number in CITATION_PATTERN.findall("\n".join(planned_text_parts))}
 
     def _blocked(self, issues: list[QualityIssue]) -> dict[str, Any]:
         first_blocking = next(
