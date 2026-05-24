@@ -22,6 +22,7 @@ from ..state import (
 from . import CITATION_PATTERN, NodeStreamEvent, _stream_llm_text, invoke_with_retry
 from .claim_audit import ExtractedClaim, RuleBasedClaimExtractor
 from .methodology_audit import MethodologyAudit, MethodologyAuditFinding
+from .paragraph_quality_audit import ParagraphQualityAudit, ParagraphQualityFinding
 
 logger = get_logger(__name__)
 
@@ -63,6 +64,7 @@ class ReviewerNode:
         self.citation_chain = self.citation_alignment_prompt | self.llm | self.parser
         self.claim_extractor = RuleBasedClaimExtractor()
         self.methodology_audit = MethodologyAudit()
+        self.paragraph_quality_audit = ParagraphQualityAudit()
 
     async def review(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]
@@ -140,6 +142,18 @@ class ReviewerNode:
         quality_issues = [*claim_quality_issues, *methodology_quality_issues]
         if methodology_issues:
             review.issues.extend(methodology_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
+
+        paragraph_issues, paragraph_quality_issues = self._audit_paragraph_quality(
+            section.section_id,
+            section.title,
+            section.content,
+            state,
+        )
+        quality_issues = [*quality_issues, *paragraph_quality_issues]
+        if paragraph_issues:
+            review.issues.extend(paragraph_issues)
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
@@ -237,6 +251,18 @@ class ReviewerNode:
         quality_issues = [*claim_quality_issues, *methodology_quality_issues]
         if methodology_issues:
             review.issues.extend(methodology_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
+
+        paragraph_issues, paragraph_quality_issues = self._audit_paragraph_quality(
+            section.section_id,
+            section.title,
+            section.content,
+            state,
+        )
+        quality_issues = [*quality_issues, *paragraph_quality_issues]
+        if paragraph_issues:
+            review.issues.extend(paragraph_issues)
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
@@ -441,6 +467,52 @@ class ReviewerNode:
 
     def _methodology_quality_issue(
         self, finding: MethodologyAuditFinding, section_id: str
+    ) -> QualityIssue:
+        return QualityIssue(
+            code=finding.code,
+            message=finding.description,
+            severity="error",
+            location=finding.location,
+            blocking=False,
+            details={"section_id": section_id},
+        )
+
+    def _audit_paragraph_quality(
+        self,
+        section_id: str,
+        section_title: str,
+        content: str,
+        state: AgentState,
+    ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
+        outline = state.get("outline")
+        section_outline = None
+        if outline is not None:
+            section_outline = next(
+                (section for section in outline.sections if section.title == section_title),
+                None,
+            )
+        findings = self.paragraph_quality_audit.audit(
+            section_title=section_title,
+            content=content,
+            section_outline=section_outline,
+        )
+
+        review_issues = [self._paragraph_review_issue(finding) for finding in findings]
+        quality_issues = [
+            self._paragraph_quality_issue(finding, section_id) for finding in findings
+        ]
+        return review_issues, quality_issues
+
+    def _paragraph_review_issue(self, finding: ParagraphQualityFinding) -> ReviewIssue:
+        return ReviewIssue(
+            type=finding.review_type,
+            description=finding.description,
+            suggestion=finding.suggestion,
+            location=finding.location,
+        )
+
+    def _paragraph_quality_issue(
+        self, finding: ParagraphQualityFinding, section_id: str
     ) -> QualityIssue:
         return QualityIssue(
             code=finding.code,

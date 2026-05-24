@@ -89,7 +89,7 @@ async def test_graph_full_run_single_section(base_state, mock_prompts):
             [
                 AIMessage(content=_topic_proposer_response()),
                 AIMessage(content=_planner_response()),
-                AIMessage(content="Introduction content."),
+                AIMessage(content="Claim for Introduction content."),
                 AIMessage(content=_reviewer_response(approved=True)),
             ]
         )
@@ -116,7 +116,7 @@ async def test_graph_planner_outline_reaches_writer(base_state, mock_prompts):
             [
                 AIMessage(content=_topic_proposer_response()),
                 AIMessage(content=_planner_response()),
-                AIMessage(content="Introduction content."),
+                AIMessage(content="Claim for Introduction content."),
                 AIMessage(content=_reviewer_response(approved=True)),
             ]
         )
@@ -156,7 +156,7 @@ async def test_graph_reviewer_rejection_triggers_retry(base_state, mock_prompts)
                 AIMessage(content=_planner_response()),
                 AIMessage(content="First draft."),
                 AIMessage(content=rejected_review),
-                AIMessage(content="Revised draft."),
+                AIMessage(content="Claim for Introduction revised draft."),
                 AIMessage(content=_reviewer_response(approved=True)),
             ]
         )
@@ -193,9 +193,9 @@ async def test_graph_max_revisions_blocks_completion(base_state, mock_prompts):
             [
                 AIMessage(content=_topic_proposer_response()),
                 AIMessage(content=_planner_response()),
-                AIMessage(content="Draft 1."),
+                AIMessage(content="Claim for Introduction draft 1."),
                 AIMessage(content=rejected_review),
-                AIMessage(content="Draft 2."),
+                AIMessage(content="Claim for Introduction draft 2."),
                 AIMessage(content=rejected_review),
             ]
         )
@@ -207,7 +207,7 @@ async def test_graph_max_revisions_blocks_completion(base_state, mock_prompts):
 
     assert result["status"] == "waiting_human"
     assert result["sections"][0].status == "review"
-    assert result["quality_issues"][0].code == "MAX_REVISIONS_REACHED"
+    assert any(issue.code == "MAX_REVISIONS_REACHED" for issue in result["quality_issues"])
 
 
 # ---------------------------------------------------------------------------
@@ -231,9 +231,9 @@ async def test_graph_multiple_sections_all_completed(base_state, mock_prompts):
             [
                 AIMessage(content=_topic_proposer_response()),
                 AIMessage(content=planner_resp),
-                AIMessage(content="Introduction content."),
+                AIMessage(content="Claim for Introduction content."),
                 AIMessage(content=_reviewer_response(approved=True)),
-                AIMessage(content="Conclusion content."),
+                AIMessage(content="Claim for Conclusion content."),
                 AIMessage(content=_reviewer_response(approved=True)),
                 AIMessage(content=json.dumps({"issues": []})),
                 AIMessage(content=json.dumps({"issues": []})),
@@ -266,7 +266,7 @@ async def test_graph_topic_proposer_populates_topics(base_state, mock_prompts):
             [
                 AIMessage(content=_topic_proposer_response()),
                 AIMessage(content=_planner_response()),
-                AIMessage(content="Introduction content."),
+                AIMessage(content="Claim for Introduction content."),
                 AIMessage(content=_reviewer_response(approved=True)),
             ]
         )

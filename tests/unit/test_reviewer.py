@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from seele_scholar_agent.nodes.reviewer import ReviewerNode
-from seele_scholar_agent.state import AgentState, ClaimEvidenceBinding, PaperMetadata, SectionDraft
+from seele_scholar_agent.state import (
+    AgentState,
+    ClaimEvidenceBinding,
+    PaperMetadata,
+    SectionDraft,
+)
 
 
 def _make_state_with_written_section(
@@ -814,3 +819,30 @@ async def test_reviewer_rejects_methodology_statistical_gaps(
     assert "METHODOLOGY_BASELINE_FAIRNESS_MISSING" in codes
     assert "METHODOLOGY_METRIC_DEFINITION_MISSING" in codes
     assert "METHODOLOGY_SIGNIFICANCE_UNCERTAINTY_MISSING" in codes
+
+
+@pytest.mark.asyncio
+async def test_reviewer_rejects_paragraph_style_quality_gaps(
+    mock_llm, mock_prompts, base_state
+):
+    paragraph = "In today's world, this section discusses the topic in broad terms."
+    section = _written_section(
+        "Discussion",
+        content=f"{paragraph}\n\n{paragraph}",
+        index=0,
+    )
+    state = _make_state_with_written_section(base_state, [section], index=0)
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    codes = {issue.code for issue in result["quality_issues"]}
+    assert result["status"] == "writing"
+    assert result["current_review"]["approved"] is False
+    assert "PARAGRAPH_DUPLICATE" in codes
+    assert "PARAGRAPH_GENERIC_TEMPLATE" in codes
