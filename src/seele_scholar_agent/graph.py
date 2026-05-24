@@ -1,6 +1,11 @@
+# ruff: noqa: I001
+
 from typing import Literal
 
 from langchain_openai import ChatOpenAI
+
+from . import _dependency_warnings  # noqa: F401
+
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -12,6 +17,7 @@ from .config import settings
 from .nodes.consistency_checker import ConsistencyCheckerNode
 from .nodes.finalizer import FinalizerNode
 from .nodes.integrity_gate import IntegrityGateNode
+from .nodes.outline_quality_gate import OutlineQualityGateNode
 from .nodes.planner import PlannerNode
 from .nodes.reference_generator import ReferenceGeneratorNode
 from .nodes.researcher import ResearcherNode
@@ -37,6 +43,7 @@ def create_writing_graph(
         extra_paper_retrievers=extra_paper_retrievers,
     )
     planner = PlannerNode(llm=model, prompts=prompts)
+    outline_quality_gate = OutlineQualityGateNode()
     writer = WriterNode(llm=model, prompts=prompts, rag_retriever=rag_retriever)
     reviewer = ReviewerNode(llm=model, prompts=prompts)
     finalizer = FinalizerNode(llm=model, prompts=prompts)
@@ -49,6 +56,7 @@ def create_writing_graph(
     graph.add_node("topic_proposer", topic_proposer.propose)
     graph.add_node("researcher", researcher.search)
     graph.add_node("planner", planner.plan)
+    graph.add_node("outline_quality_gate", outline_quality_gate.check)
     graph.add_node("writer", writer.write)
     graph.add_node("reviewer", reviewer.review)
     graph.add_node("finalizer", finalizer.finalize)
@@ -59,7 +67,12 @@ def create_writing_graph(
     graph.add_edge(START, "topic_proposer")
     graph.add_edge("topic_proposer", "researcher")
     graph.add_edge("researcher", "planner")
-    graph.add_edge("planner", "writer")
+    graph.add_edge("planner", "outline_quality_gate")
+    graph.add_conditional_edges(
+        "outline_quality_gate",
+        route_quality_gate,
+        {"writer": "writer", "end": END},
+    )
     graph.add_edge("writer", "reviewer")
 
     def route_reviewer(state: AgentState) -> Literal["writer", "finalizer", "end"]:
@@ -105,6 +118,7 @@ def create_simple_writing_graph(
         extra_paper_retrievers=extra_paper_retrievers,
     )
     planner = PlannerNode(llm=model, prompts=prompts)
+    outline_quality_gate = OutlineQualityGateNode()
     writer = WriterNode(llm=model, prompts=prompts, rag_retriever=rag_retriever)
     reviewer = ReviewerNode(llm=model, prompts=prompts)
     finalizer = FinalizerNode(llm=model, prompts=prompts)
@@ -117,6 +131,7 @@ def create_simple_writing_graph(
     graph.add_node("proposer", topic_proposer.propose)
     graph.add_node("researcher", researcher.search)
     graph.add_node("planner", planner.plan)
+    graph.add_node("outline_quality_gate", outline_quality_gate.check)
     graph.add_node("writer", writer.write)
     graph.add_node("reviewer", reviewer.review)
     graph.add_node("finalizer", finalizer.finalize)
@@ -127,7 +142,12 @@ def create_simple_writing_graph(
     graph.add_edge(START, "proposer")
     graph.add_edge("proposer", "researcher")
     graph.add_edge("researcher", "planner")
-    graph.add_edge("planner", "writer")
+    graph.add_edge("planner", "outline_quality_gate")
+    graph.add_conditional_edges(
+        "outline_quality_gate",
+        route_quality_gate,
+        {"writer": "writer", "end": END},
+    )
     graph.add_edge("writer", "reviewer")
 
     def should_continue(state: AgentState) -> Literal["writer", "finalizer", "end"]:
@@ -157,3 +177,9 @@ def _has_blocking_quality_issues(state: AgentState) -> bool:
     return any(
         issue.blocking or issue.severity == "blocking" for issue in state.get("quality_issues", [])
     )
+
+
+def route_quality_gate(state: AgentState) -> Literal["writer", "end"]:
+    if _has_blocking_quality_issues(state):
+        return "end"
+    return "writer"

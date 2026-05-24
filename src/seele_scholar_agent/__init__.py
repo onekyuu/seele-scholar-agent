@@ -6,6 +6,7 @@ from .nodes import NodeStreamEvent
 from .nodes.consistency_checker import ConsistencyCheckerNode
 from .nodes.finalizer import FinalizerNode
 from .nodes.integrity_gate import IntegrityGateNode
+from .nodes.outline_quality_gate import OutlineQualityGateNode
 from .nodes.planner import PlannerNode
 from .nodes.reference_generator import ReferenceGeneratorNode
 from .nodes.researcher import ResearcherNode
@@ -38,6 +39,7 @@ __all__ = [
     "ConsistencyCheckerNode",
     "ReferenceGeneratorNode",
     "IntegrityGateNode",
+    "OutlineQualityGateNode",
     "AgentState",
     "PaperMetadata",
     "QualityIssue",
