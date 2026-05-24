@@ -13,11 +13,12 @@
 
 - 从 OpenAlex、Semantic Scholar、ArXiv 和自定义检索器搜索论文。
 - 从宽泛研究方向推荐具体论文选题。
-- 生成结构化论文大纲，并为章节标注建议图表。
-- 结合编号引用和可选 RAG 上下文撰写章节。
-- 审阅章节、修订草稿，并按章节限制最大修订轮次。
-- 使用 CrossRef 补全元数据并生成参考文献。
-- 在参考文献生成后检查术语、逻辑和引用一致性。
+- 生成感知论文类型的大纲，包含章节目的、过渡、证据映射和建议图表。
+- 结合编号引用、evidence packet 和 claim-evidence binding 撰写章节。
+- 审阅章节、修订草稿，并按章节限制最大修订轮次，不再强制通过未通过审稿的章节。
+- 使用 CrossRef / OpenAlex 补全元数据并生成参考文献；正文无内联引用时返回质量问题。
+- 检查大纲质量、引用有效性、claim 支撑、方法学与统计、段落质量、术语、逻辑和引用一致性。
+- 为中文、日语和英文应用语言感知的学术写作 style pack。
 - 使用 `astream()` 流式输出节点结果，便于 UI 集成。
 
 ## 安装
@@ -61,6 +62,54 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 ```
 
 任何 OpenAI 兼容端点都可以通过 `ChatOpenAI` 接入。
+
+## 质量控制
+
+工作流除了 LLM 审稿外，还包含确定性的质量门：
+
+- `OutlineQualityGateNode`：阻断缺少 purpose、transition、target claims、evidence plan 的大纲，也会检查非实验论文是否误套实验论文结构。
+- `ReviewerNode`：检查引用编号、claim-source 支撑、方法学/统计问题、段落质量和语言相关写作风格。
+- `ReferenceGeneratorNode`：正文没有内联引用时返回 `NO_INLINE_CITATIONS`，不会生成全量参考文献。
+- `IntegrityGateNode`：当 `strict_academic_mode=True` 时启用更严格的学术完整性检查。
+- `MaterialRegistry`：调用方传入后，常驻检查上传文献、外部检索文献、仅作背景、不可引用、可信/低置信来源等来源边界。
+
+RAG 上下文会升级为 evidence packet，包含 `chunk_id`、标题、作者、年份、页码、章节、相关性分数、相关性说明和 quote。Writer 生成后会通过 `ClaimEvidenceBinding` 审计引用是否支撑具体 claim，而不是只检查引用编号是否存在。
+
+## 调用方 State 选项
+
+调用方可以在 `AgentState` 中传入以下可选字段，控制论文结构、证据策略和写作风格：
+
+```python
+state.update(
+    {
+        "paper_type": "literature_review",
+        "structure_pattern": "thematic_review",
+        "target_word_count": 6000,
+        "strict_academic_mode": True,
+        "writing_locale": "zh-CN",  # zh-CN、ja-JP、en-US 或自定义 locale
+        "style_profile": "thesis",
+        "term_glossary": {"大语言模型": "大型语言模型"},
+        "style_pack_override": {
+            "display_name": "自定义学位论文风格",
+            "general_guidance": ["使用学校指定的学术写作风格。"],
+        },
+        "material_registry": {
+            "entries": [
+                {
+                    "paper_id": "user-paper-1",
+                    "source_origin": "user_upload",
+                    "citation_role": "citable",
+                    "confidence": "trusted",
+                    "required": True,
+                }
+            ]
+        },
+        "check_required_material_relevance": True,
+    }
+)
+```
+
+只要传入 `material_registry`，来源边界检查就是常驻的。用户指定必引文献的相关性检查是可选功能，只在 `check_required_material_relevance=True` 时运行。必引文献通过 `material_registry.entries[].required=True` 标定。
 
 ## 快速开始
 
@@ -142,10 +191,12 @@ START
   -> topic_proposer
   -> researcher
   -> planner
+  -> outline_quality_gate
   -> writer <-> reviewer
   -> finalizer
   -> reference_generator
   -> consistency_checker
+  -> integrity_gate
   -> END
 ```
 
@@ -161,15 +212,19 @@ src/seele_scholar_agent/
 ├── i18n.py
 ├── logging.py
 ├── state.py
+├── style_packs.py
 ├── nodes/
 │   ├── topic_proposer.py
 │   ├── researcher.py
 │   ├── planner.py
+│   ├── outline_quality_gate.py
 │   ├── writer.py
 │   ├── reviewer.py
 │   ├── finalizer.py
 │   ├── reference_generator.py
-│   └── consistency_checker.py
+│   ├── consistency_checker.py
+│   ├── integrity_gate.py
+│   └── language_style_audit.py
 └── tools/
     └── crossref.py
 ```
