@@ -74,6 +74,14 @@ class SectionEvidencePlan(BaseModel):
     citation_plan: list[str] = Field(default_factory=list)
 
 
+class SectionStyleGuidance(BaseModel):
+    argument_mode: str = ""
+    sentence_style: str = ""
+    transition_style: str = ""
+    forbidden_patterns: list[str] = Field(default_factory=list)
+    style_reference_ids: list[str] = Field(default_factory=list)
+
+
 class SectionOutline(BaseModel):
     title: str
     description: str = ""
@@ -88,6 +96,7 @@ class SectionOutline(BaseModel):
     evidence_gaps: list[str] = Field(default_factory=list)
     citation_plan: list[str] = Field(default_factory=list)
     transition_to_next: str = ""
+    section_style: SectionStyleGuidance = Field(default_factory=SectionStyleGuidance)
 
 
 class OutlineStructure(BaseModel):
@@ -179,6 +188,10 @@ class AgentState(TypedDict):
     paper_type: NotRequired[str]
     structure_pattern: NotRequired[str]
     target_word_count: NotRequired[int]
+    writing_locale: NotRequired[str]
+    style_profile: NotRequired[str]
+    style_pack_override: NotRequired[dict[str, Any]]
+    term_glossary: NotRequired[dict[str, str]]
     strict_academic_mode: NotRequired[bool]
     check_required_material_relevance: NotRequired[bool]
     material_registry: NotRequired[MaterialRegistry]

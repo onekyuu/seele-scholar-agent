@@ -33,6 +33,9 @@ Paper type: {paper_type}
 Structure pattern: {structure_pattern}
 Target word count: {target_word_count}
 
+Style guidance:
+{style_guidance}
+
 Papers:
 {papers_summary}
 
@@ -57,6 +60,13 @@ Return JSON:
       "citation_plan": ["Use [1] for background definitions"],
       "evidence_gaps": ["Evidence still needed"],
       "transition_to_next": "How this section leads into the next one",
+      "section_style": {{
+        "argument_mode": "How this section should argue in the target locale",
+        "sentence_style": "Recommended sentence style",
+        "transition_style": "Recommended transition style",
+        "forbidden_patterns": ["Patterns to avoid"],
+        "style_reference_ids": ["style reference id"]
+      }},
       "suggested_figures": []
     }}
   ],
@@ -94,6 +104,9 @@ Papers:
 
 Evidence packets:
 {rag_context}
+
+Style guidance:
+{style_guidance}
 
 Review comments:
 {review_comments}

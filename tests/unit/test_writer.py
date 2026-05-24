@@ -23,17 +23,20 @@ from seele_scholar_agent.state import (
 
 @pytest.mark.asyncio
 async def test_writer_normal_write(mock_llm, mock_prompts, state_with_outline):
-    with patch(
-        "seele_scholar_agent.nodes.writer.invoke_with_retry",
-        new_callable=AsyncMock,
-        return_value=AIMessage(content="This is the introduction content."),
-    ):
+    captured_input: dict = {}
+
+    async def capture_invoke(chain, input_data):  # type: ignore[override]
+        captured_input.update(input_data)
+        return AIMessage(content="This is the introduction content.")
+
+    with patch("seele_scholar_agent.nodes.writer.invoke_with_retry", side_effect=capture_invoke):
         node = WriterNode(llm=mock_llm, prompts=mock_prompts)
         result = await node.write(state_with_outline)
 
     assert result["sections"][0].content == "This is the introduction content."
     assert result["sections"][0].status == "review"
     assert result["status"] == "reviewing"
+    assert "Writing locale: zh-CN" in captured_input["style_guidance"]
 
 
 # ---------------------------------------------------------------------------

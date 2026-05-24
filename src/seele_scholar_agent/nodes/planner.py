@@ -15,7 +15,9 @@ from ..state import (
     SectionDraft,
     SectionEvidencePlan,
     SectionOutline,
+    SectionStyleGuidance,
 )
+from ..style_packs import build_planner_style_context
 from . import NodeStreamEvent, _stream_llm_text, invoke_with_retry
 from .material_registry import (
     annotate_paper_summaries,
@@ -51,6 +53,7 @@ class PlannerNode:
         paper_type = str(state.get("paper_type", "auto"))
         structure_pattern = str(state.get("structure_pattern", "auto"))
         target_word_count = str(state.get("target_word_count", "auto"))
+        style_context = build_planner_style_context(state, paper_type, structure_pattern)
 
         logger.info(
             "generating outline",
@@ -72,6 +75,7 @@ class PlannerNode:
                     "paper_type": paper_type,
                     "structure_pattern": structure_pattern,
                     "target_word_count": target_word_count,
+                    "style_guidance": style_context,
                 },
             )
         except Exception as e:
@@ -106,6 +110,7 @@ class PlannerNode:
         paper_summaries: list[str] = state.get("paper_summaries") or []
         paper_type = str(state.get("paper_type", "auto"))
         structure_pattern = str(state.get("structure_pattern", "auto"))
+        style_context = build_planner_style_context(state, paper_type, structure_pattern)
 
         input_data = {
             "topic": topic,
@@ -118,6 +123,7 @@ class PlannerNode:
             "paper_type": paper_type,
             "structure_pattern": structure_pattern,
             "target_word_count": str(state.get("target_word_count", "auto")),
+            "style_guidance": style_context,
         }
 
         yield NodeStreamEvent(type="progress", progress="generating_outline")
@@ -172,6 +178,7 @@ class PlannerNode:
                 "evidence_gaps": ["LLM planning failed; evidence mapping needs review"],
                 "citation_plan": [],
                 "transition_to_next": "",
+                "section_style": {},
             }
             for i in range(len(sections_titles))
         ]
@@ -258,6 +265,18 @@ class PlannerNode:
             evidence_gaps=self._as_str_list(raw.get("evidence_gaps")),
             citation_plan=self._as_str_list(raw.get("citation_plan")),
             transition_to_next=raw.get("transition_to_next", ""),
+            section_style=self._build_section_style(raw.get("section_style")),
+        )
+
+    def _build_section_style(self, raw: Any) -> SectionStyleGuidance:
+        if not isinstance(raw, dict):
+            return SectionStyleGuidance()
+        return SectionStyleGuidance(
+            argument_mode=str(raw.get("argument_mode") or ""),
+            sentence_style=str(raw.get("sentence_style") or ""),
+            transition_style=str(raw.get("transition_style") or ""),
+            forbidden_patterns=self._as_str_list(raw.get("forbidden_patterns")),
+            style_reference_ids=self._as_str_list(raw.get("style_reference_ids")),
         )
 
     def _build_evidence_map(
