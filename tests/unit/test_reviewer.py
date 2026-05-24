@@ -781,3 +781,36 @@ async def test_reviewer_rejects_stale_binding_for_different_claim(
     assert result["status"] == "writing"
     assert result["current_review"]["approved"] is False
     assert result["quality_issues"][0].code == "CLAIM_MISSING_EVIDENCE_PACKET"
+
+
+@pytest.mark.asyncio
+async def test_reviewer_rejects_methodology_statistical_gaps(
+    mock_llm, mock_prompts, base_state
+):
+    section = _written_section(
+        "Results",
+        content="Our model significantly improves accuracy on the dataset.",
+        index=0,
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "paper_type": "empirical",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    codes = {issue.code for issue in result["quality_issues"]}
+    assert result["status"] == "writing"
+    assert result["current_review"]["approved"] is False
+    assert "METHODOLOGY_BASELINE_FAIRNESS_MISSING" in codes
+    assert "METHODOLOGY_METRIC_DEFINITION_MISSING" in codes
+    assert "METHODOLOGY_SIGNIFICANCE_UNCERTAINTY_MISSING" in codes

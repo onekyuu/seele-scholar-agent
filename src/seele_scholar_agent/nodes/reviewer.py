@@ -21,6 +21,7 @@ from ..state import (
 )
 from . import CITATION_PATTERN, NodeStreamEvent, _stream_llm_text, invoke_with_retry
 from .claim_audit import ExtractedClaim, RuleBasedClaimExtractor
+from .methodology_audit import MethodologyAudit, MethodologyAuditFinding
 
 logger = get_logger(__name__)
 
@@ -61,6 +62,7 @@ class ReviewerNode:
         self.stream_chain = self.prompt | self.llm
         self.citation_chain = self.citation_alignment_prompt | self.llm | self.parser
         self.claim_extractor = RuleBasedClaimExtractor()
+        self.methodology_audit = MethodologyAudit()
 
     async def review(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]
@@ -129,6 +131,18 @@ class ReviewerNode:
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
+        methodology_issues, methodology_quality_issues = self._audit_methodology_statistics(
+            section.section_id,
+            section.title,
+            section.content,
+            state,
+        )
+        quality_issues = [*claim_quality_issues, *methodology_quality_issues]
+        if methodology_issues:
+            review.issues.extend(methodology_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
+
         record = {
             "section": section.title,
             "score": review.score,
@@ -138,7 +152,7 @@ class ReviewerNode:
 
         if review.approved:
             return await self._handle_approved(state, section, review, record)
-        return await self._handle_rejected(state, section, review, record, claim_quality_issues)
+        return await self._handle_rejected(state, section, review, record, quality_issues)
 
     async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
         sections = state["sections"]
@@ -214,6 +228,18 @@ class ReviewerNode:
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
+        methodology_issues, methodology_quality_issues = self._audit_methodology_statistics(
+            section.section_id,
+            section.title,
+            section.content,
+            state,
+        )
+        quality_issues = [*claim_quality_issues, *methodology_quality_issues]
+        if methodology_issues:
+            review.issues.extend(methodology_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
+
         record = {
             "section": section.title,
             "score": review.score,
@@ -225,7 +251,7 @@ class ReviewerNode:
             final_result = await self._handle_approved(state, section, review, record)
         else:
             final_result = await self._handle_rejected(
-                state, section, review, record, claim_quality_issues
+                state, section, review, record, quality_issues
             )
 
         yield NodeStreamEvent(type="result", result=final_result)
@@ -379,6 +405,51 @@ class ReviewerNode:
             )
 
         return issues, quality_issues
+
+    def _audit_methodology_statistics(
+        self,
+        section_id: str,
+        section_title: str,
+        content: str,
+        state: AgentState,
+    ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
+        outline = state.get("outline")
+        paper_type = str(state.get("paper_type") or getattr(outline, "paper_type", "") or "")
+        structure_pattern = str(
+            state.get("structure_pattern") or getattr(outline, "structure_pattern", "") or ""
+        )
+        findings = self.methodology_audit.audit(
+            section_title=section_title,
+            content=content,
+            paper_type=paper_type,
+            structure_pattern=structure_pattern,
+        )
+
+        review_issues = [self._methodology_review_issue(finding) for finding in findings]
+        quality_issues = [
+            self._methodology_quality_issue(finding, section_id) for finding in findings
+        ]
+        return review_issues, quality_issues
+
+    def _methodology_review_issue(self, finding: MethodologyAuditFinding) -> ReviewIssue:
+        return ReviewIssue(
+            type=finding.review_type,
+            description=finding.description,
+            suggestion=finding.suggestion,
+            location=finding.location,
+        )
+
+    def _methodology_quality_issue(
+        self, finding: MethodologyAuditFinding, section_id: str
+    ) -> QualityIssue:
+        return QualityIssue(
+            code=finding.code,
+            message=finding.description,
+            severity="error",
+            location=finding.location,
+            blocking=False,
+            details={"section_id": section_id},
+        )
 
     def _unsupported_binding_issue(self, binding: ClaimEvidenceBinding) -> ReviewIssue:
         return ReviewIssue(
