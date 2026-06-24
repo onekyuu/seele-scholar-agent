@@ -13,7 +13,10 @@ from seele_scholar_agent.state import (
     EvidencePacket,
     MaterialRegistry,
     MaterialRegistryEntry,
+    OutlineStructure,
+    PaperMetadata,
     SectionDraft,
+    SectionOutline,
 )
 
 # ---------------------------------------------------------------------------
@@ -643,3 +646,229 @@ def test_figure_pattern_does_not_match_malformed_placeholder():
     for case in malformed_cases:
         matches = FIGURE_PATTERN.findall(case)
         assert matches == [], f"Should not match: {case}"
+
+
+@pytest.mark.asyncio
+async def test_proposal_schedule_rewrite_prompt_requires_two_year_timeline(
+    mock_llm, mock_prompts, base_state
+):
+    captured_input: dict = {}
+
+    async def capture_invoke(chain, input_data):  # type: ignore[override]
+        captured_input.update(input_data)
+        return AIMessage(
+            content=(
+                "1年次前期に先行研究を整理する。1年次後期にプロトタイプを開発する。"
+                "2年次前期に評価実験を行う。2年次後期に論文を執筆する。"
+            )
+        )
+
+    section = SectionDraft(
+        section_id="schedule",
+        title="研究計画・スケジュール",
+        description="研究計画書全体 2000-2500 字の第5章。",
+        order_index=5,
+        content="1年次前期に文献調査を行う。",
+        status="writing",
+        revision_count=1,
+        review_comments=["2年次の研究計画が欠落している。"],
+    )
+    outline = OutlineStructure(
+        title="研究計画書",
+        abstract="",
+        sections=[
+            SectionOutline(
+                title=section.title,
+                description=section.description,
+                order=5,
+            )
+        ],
+        paper_type="research_proposal",
+    )
+    state = cast(
+        AgentState,
+        {
+            **base_state,
+            "document_type": "research_proposal",
+            "language": "ja",
+            "topic": "ゲーム音響における感情曲線設計",
+            "outline": outline,
+            "sections": [section],
+            "status": "writing",
+        },
+    )
+
+    with patch("seele_scholar_agent.nodes.writer.invoke_with_retry", side_effect=capture_invoke):
+        node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.write(state)
+
+    rendered_user_prompt = node.proposal_revision_prompt.format_messages(**captured_input)[
+        1
+    ].content
+    assert result["writer_diagnostics"]["revision_mode"] is True
+    assert result["writer_diagnostics"]["proposal_profile"] is True
+    assert captured_input["current_content"] == "1年次前期に文献調査を行う。"
+    assert "2年次の研究計画が欠落" in captured_input["review_comments"]
+    for phase in ("1年次前期", "1年次後期", "2年次前期", "2年次後期"):
+        assert phase in rendered_user_prompt
+
+
+def test_proposal_writer_budget_description_uses_budget_as_hard_constraint(
+    mock_llm, mock_prompts
+):
+    section = SectionDraft(
+        section_id="s1",
+        title="研究背景",
+        description="研究計画書全文 2000-2500 字のうち、本章は約400字。",
+        order_index=1,
+    )
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+
+    description = node._build_section_description(section)
+
+    assert "only hard length limit" in description
+    assert "Default length target: 200-500" not in description
+
+
+def test_citation_binder_exposes_unverified_diagnostics(mock_llm, mock_prompts):
+    section = SectionDraft(section_id="s1", title="背景", order_index=1)
+    paper = PaperMetadata(
+        paper_id="p1",
+        title="Evidence Paper",
+        authors=["Author"],
+        abstract="Abstract.",
+        source="openalex",
+    )
+    node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+
+    bindings = node.citation_binder.bind(
+        section,
+        "先行研究は重要な背景を示している [1]。",
+        [paper],
+        [],
+    )
+
+    assert bindings[0].verdict == "unverified"
+    assert bindings[0].diagnostics["evidence_packet_count"] == 0
+    assert bindings[0].diagnostics["candidate_count"] == 0
+    assert bindings[0].diagnostics["source_paper_id"] == "p1"
+
+
+@pytest.mark.asyncio
+async def test_academic_revision_uses_revision_prompt(
+    mock_llm, mock_prompts, state_with_outline
+):
+    captured_input: dict = {}
+
+    async def capture_invoke(chain, input_data):  # type: ignore[override]
+        captured_input.update(input_data)
+        return AIMessage(content="Revised academic content with a valid citation [1].")
+
+    sections = list(state_with_outline["sections"])
+    sections[0] = sections[0].model_copy(
+        update={
+            "content": "Old content makes an unsupported claim.",
+            "status": "writing",
+            "revision_count": 1,
+            "review_comments": [
+                "Issue 1: missing_citation: unsupported claim.",
+                "Suggestion: add a valid citation or remove the claim.",
+            ],
+        }
+    )
+    state = cast(
+        AgentState,
+        {
+            **state_with_outline,
+            "document_type": "academic_paper",
+            "sections": sections,
+            "current_section_index": 0,
+        },
+    )
+
+    with patch("seele_scholar_agent.nodes.writer.invoke_with_retry", side_effect=capture_invoke):
+        node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.write(state)
+
+    rendered_user_prompt = node.academic_revision_prompt.format_messages(**captured_input)[
+        1
+    ].content
+    assert result["writer_diagnostics"]["revision_mode"] is True
+    assert result["writer_diagnostics"]["writer_mode"] == "academic_revision"
+    assert result["writer_diagnostics"]["proposal_profile"] is False
+    assert captured_input["current_content"] == "Old content makes an unsupported claim."
+    assert "missing_citation" in captured_input["review_comments"]
+    assert "unsupported claim" in rendered_user_prompt
+    assert "有效 [N] 引用" in rendered_user_prompt
+
+
+@pytest.mark.asyncio
+async def test_academic_initial_draft_keeps_regular_writer_prompt(
+    mock_llm, mock_prompts, state_with_outline
+):
+    with patch(
+        "seele_scholar_agent.nodes.writer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=AIMessage(content="Initial academic draft."),
+    ):
+        node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.write({**state_with_outline, "document_type": "academic_paper"})
+
+    assert result["writer_diagnostics"]["revision_mode"] is False
+    assert result["writer_diagnostics"]["writer_mode"] == "draft"
+    assert result["writer_diagnostics"]["proposal_profile"] is False
+
+
+@pytest.mark.asyncio
+async def test_proposal_initial_draft_uses_proposal_prompt(
+    mock_llm, mock_prompts, base_state
+):
+    captured_input: dict = {}
+
+    async def capture_invoke(chain, input_data):  # type: ignore[override]
+        captured_input.update(input_data)
+        return AIMessage(content="研究計画書の初稿本文。")
+
+    section = SectionDraft(
+        section_id="s1",
+        title="研究目的・研究課題",
+        description="研究目的を約450字で述べる。",
+        order_index=1,
+    )
+    outline = OutlineStructure(
+        title="研究計画書",
+        abstract="",
+        sections=[
+            SectionOutline(
+                title=section.title,
+                description=section.description,
+                order=1,
+                target_words=450,
+            )
+        ],
+        paper_type="research_proposal",
+        structure_pattern="research_proposal",
+    )
+    state = cast(
+        AgentState,
+        {
+            **base_state,
+            "document_type": "research_proposal",
+            "language": "ja",
+            "outline": outline,
+            "sections": [section],
+            "status": "writing",
+        },
+    )
+
+    with patch("seele_scholar_agent.nodes.writer.invoke_with_retry", side_effect=capture_invoke):
+        node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.write(state)
+
+    rendered_user_prompt = node.proposal_draft_prompt.format_messages(**captured_input)[
+        1
+    ].content
+    assert result["writer_diagnostics"]["writer_mode"] == "proposal_draft"
+    assert result["writer_diagnostics"]["revision_mode"] is False
+    assert "日本大学院研究計画書" in rendered_user_prompt
+    assert "申请者自身的问题意识" in rendered_user_prompt

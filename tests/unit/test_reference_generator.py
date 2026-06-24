@@ -67,6 +67,28 @@ async def test_reference_generator_no_citations_returns_quality_issue(base_state
     assert result["status"] == "completed"
 
 
+@pytest.mark.asyncio
+async def test_reference_generator_proposal_no_citations_is_warning(base_state, sample_papers):
+    sections = [_make_section("本研究では二年間の計画を実施する。")]
+    state = cast(
+        AgentState,
+        {
+            **base_state,
+            "document_type": "research_proposal",
+            "papers": sample_papers,
+            "sections": sections,
+        },
+    )
+
+    node = ReferenceGeneratorNode()
+    result = await node.generate(state)
+
+    assert result["references"] == []
+    assert result["quality_issues"][0].code == "PROPOSAL_NO_INLINE_CITATIONS"
+    assert result["quality_issues"][0].blocking is False
+    assert result["quality_issues"][0].severity == "warning"
+
+
 # ---------------------------------------------------------------------------
 # REF-03: Citation number out of range → skipped, no error raised
 # ---------------------------------------------------------------------------

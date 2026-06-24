@@ -846,3 +846,191 @@ async def test_reviewer_rejects_paragraph_style_quality_gaps(
     assert result["current_review"]["approved"] is False
     assert "PARAGRAPH_DUPLICATE" in codes
     assert "PARAGRAPH_GENERIC_TEMPLATE" in codes
+
+
+@pytest.mark.asyncio
+async def test_proposal_schedule_plan_sentence_does_not_trigger_missing_citation(
+    mock_llm, mock_prompts, base_state
+):
+    section = _written_section(
+        "研究計画・スケジュール",
+        content="1年次後期にプロトタイプを実装し、評価手法を検証する。",
+        index=0,
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "document_type": "research_proposal",
+            "language": "ja",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    issues = result["current_review"]["issues"]
+    assert not any(issue["type"] == "missing_citation" for issue in issues)
+    assert any(issue["type"] == "format_issue" for issue in issues)
+
+
+@pytest.mark.asyncio
+async def test_reviewer_still_rejects_academic_uncited_factual_claim(
+    mock_llm, mock_prompts, base_state
+):
+    section = _written_section(
+        "Results",
+        content="The model improves accuracy by 12%.",
+        index=0,
+    )
+    state = _make_state_with_written_section(base_state, [section], index=0)
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "writing"
+    assert result["current_review"]["approved"] is False
+    assert any(
+        issue["type"] == "missing_citation" for issue in result["current_review"]["issues"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_proposal_short_paragraph_not_blocked_for_missing_evidence_analysis(
+    mock_llm, mock_prompts, base_state
+):
+    section = _written_section(
+        "研究方法",
+        content=(
+            "本研究では、ユーザー定義感情曲線に基づくゲーム音響設計支援手法を"
+            "設計し、Wwise 上で実装可能な制作フローとして整理する。"
+        ),
+        index=0,
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "document_type": "research_proposal",
+            "language": "ja",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "completed"
+    assert result["current_review"]["approved"] is True
+    codes = {issue.code for issue in result.get("quality_issues", [])}
+    assert "PARAGRAPH_STRUCTURE_INCOMPLETE" not in codes
+
+
+@pytest.mark.asyncio
+async def test_proposal_invalid_citation_number_still_reports_missing_citation(
+    mock_llm, mock_prompts, base_state
+):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="Evidence Paper",
+            authors=["Author"],
+            abstract="Evidence abstract.",
+            source="openalex",
+        )
+    ]
+    section = _written_section(
+        "研究背景",
+        content="先行研究は音響設計の重要性を示している [2]。",
+        index=0,
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "document_type": "research_proposal",
+            "papers": papers,
+            "language": "ja",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    issues = result["current_review"]["issues"]
+    assert result["status"] == "writing"
+    assert any(
+        issue["type"] == "missing_citation" and "[2]" in issue["description"]
+        for issue in issues
+    )
+
+
+@pytest.mark.asyncio
+async def test_proposal_unverified_binding_is_deferred_warning(
+    mock_llm, mock_prompts, base_state
+):
+    papers = [
+        PaperMetadata(
+            paper_id="p1",
+            title="Evidence Paper",
+            authors=["Author"],
+            abstract="Evidence abstract.",
+            source="openalex",
+        )
+    ]
+    section = _written_section(
+        "研究背景",
+        content="先行研究は音響体験に関する重要な知見を示している [1]。",
+        index=0,
+    )
+    binding = ClaimEvidenceBinding(
+        section_id=section.section_id,
+        claim_text=section.content,
+        citation_number=1,
+        source_paper_id="p1",
+        verdict="unverified",
+        diagnostics={"evidence_packet_count": 0, "candidate_count": 0},
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "document_type": "research_proposal",
+            "papers": papers,
+            "claim_evidence_bindings": [binding],
+            "language": "ja",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "completed"
+    assert result["current_review"]["approved"] is True
+    assert result["quality_issues"][0].severity == "warning"
+    assert result["quality_issues"][0].details["deferred"] is True
+    assert result["review_diagnostics"]["deferred_quality_issue_count"] == 1

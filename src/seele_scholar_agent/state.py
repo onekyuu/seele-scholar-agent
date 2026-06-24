@@ -129,6 +129,7 @@ class ClaimEvidenceBinding(BaseModel):
     source_paper_id: str | None = None
     support_score: float = 0.0
     verdict: Literal["supported", "weak", "unsupported", "unverified"] = "unverified"
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReviewIssue(BaseModel):
@@ -185,6 +186,9 @@ class QualityIssue(BaseModel):
 class AgentState(TypedDict):
     thread_id: str
     topic: str
+    document_type: NotRequired[str]
+    generation_config: NotRequired[Any]
+    metadata: NotRequired[dict[str, Any]]
     paper_type: NotRequired[str]
     structure_pattern: NotRequired[str]
     target_word_count: NotRequired[int]

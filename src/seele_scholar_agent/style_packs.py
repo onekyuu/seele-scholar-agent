@@ -114,6 +114,13 @@ DEFAULT_STYLE_PACKS: dict[str, LocaleStylePack] = {
                 "事例の選定理由、分析視点、観察結果、一般化可能性を明示する。",
                 "単なる事例紹介に留めず、理論的または実務的含意へ接続する。",
             ],
+            "research_proposal": [
+                "研究計画書として、申請者固有の問題意識、研究目的、方法、実行計画を"
+                "具体的に述べる。",
+                "先行研究は背景や未解決課題の説明に使い、申請者自身の予定や"
+                "スケジュールに過度な引用を付けない。",
+                "二年間の修士研究として実行可能な作業、成果物、評価方法を明示する。",
+            ],
         },
         default_section_style=SectionStyleGuidance(
             argument_mode="問題設定、根拠、考察、含意の順に段落を展開する。",
@@ -160,6 +167,21 @@ DEFAULT_STYLE_PACKS: dict[str, LocaleStylePack] = {
                 ],
                 style_reference_ids=["ja_academic_analysis_1"],
             ),
+            "research_proposal": SectionStyleGuidance(
+                argument_mode=(
+                    "問題意識、研究目的、方法、実行計画、期待成果を申請材料として"
+                    "一貫させる。"
+                ),
+                sentence_style="である調を基本とし、抽象的抱負ではなく具体的な研究動作を書く。",
+                transition_style="各章の役割を明確にし、動機から目的、方法、計画へ自然に接続する。",
+                forbidden_patterns=[
+                    "論文結果のような断定",
+                    "先行研究の列挙だけで終わる背景説明",
+                    "二年次計画を省いたスケジュール",
+                    "志望理由だけで研究方法が薄い構成",
+                ],
+                style_reference_ids=["ja_research_proposal_1"],
+            ),
         },
         style_references=[
             StyleReference(
@@ -183,6 +205,17 @@ DEFAULT_STYLE_PACKS: dict[str, LocaleStylePack] = {
                     "特定の条件下で生じる誤差の偏りが見えにくくなる。これに対して、"
                     "安定性や計算コストを併せて検討すれば、性能向上がどのような代償を"
                     "伴うのかを評価できる。"
+                ),
+            ),
+            StyleReference(
+                reference_id="ja_research_proposal_1",
+                description="研究計画書における目的と方法の接続例",
+                text=(
+                    "本研究では、利用者が意図する感情変化を音響制作の判断基準として"
+                    "扱い、ゲーム内イベントと音響パラメータの対応関係を整理する。"
+                    "まず先行研究と制作事例を検討し、感情曲線を記述するための観点を"
+                    "抽出する。次に、Wwise を用いた小規模な試作環境を構築し、場面遷移"
+                    "に応じた音響変化を検証する。"
                 ),
             ),
         ],

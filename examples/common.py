@@ -25,7 +25,7 @@ def build_prompts() -> PromptsConfig:
     return PromptsConfig(
         planner_system_prompt=(
             "You are an academic structure architect. Select an appropriate "
-            "paper type and structure pattern, then generate a structured "
+            "document type and structure pattern, then generate a structured "
             "{language} outline as valid JSON."
         ),
         planner_user_prompt="""Topic: {topic}
@@ -43,8 +43,8 @@ Return JSON:
 {{
   "title": "{title_placeholder}",
   "abstract": "{abstract_placeholder}",
-  "paper_type": "empirical|literature_review|theoretical|case_study|policy_brief|conference|auto",
-  "structure_pattern": "IMRaD|thematic_review|theoretical_analysis|case_study|auto",
+  "paper_type": "empirical|literature_review|theoretical|case_study|policy_brief|conference|research_proposal|auto",
+  "structure_pattern": "IMRaD|thematic_review|theoretical_analysis|case_study|research_proposal|auto",
   "rationale": "Why this structure fits the topic and literature",
   "sections": [
     {{
@@ -82,7 +82,8 @@ Return JSON:
   "keywords": ["{keyword_placeholder}"]
 }}""",
         writer_system_prompt=(
-            "You are an academic writer. Write rigorous {language} prose. Use [N] "
+            "You are an academic writer. Write rigorous {language} prose or, when "
+            "requested, concrete research-proposal prose. Use [N] "
             "citations only from the provided paper list. Do not output section headings."
         ),
         writer_user_prompt="""Topic: {topic}

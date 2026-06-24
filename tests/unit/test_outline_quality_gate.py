@@ -248,3 +248,80 @@ async def test_outline_quality_gate_warns_required_material_low_relevance_when_e
 
     assert result["quality_issues"][0].code == "REQUIRED_MATERIAL_LOW_RELEVANCE"
     assert result["quality_issues"][0].blocking is False
+
+
+@pytest.mark.asyncio
+async def test_outline_quality_gate_proposal_allows_sections_without_claims(base_state):
+    sections = [
+        SectionOutline(
+            title="研究背景・問題意識",
+            description="背景。",
+            order=1,
+            purpose="問題意識を示す。",
+            content_summary="背景。",
+            target_words=450,
+            target_claims=[],
+            key_sources=[],
+            citation_plan=[],
+            transition_to_next="目的へ接続する。",
+        ),
+        SectionOutline(
+            title="研究計画・スケジュール",
+            description="1年次前期、1年次後期、2年次前期、2年次後期を述べる。",
+            order=2,
+            purpose="二年間の計画を示す。",
+            content_summary="1年次前期、1年次後期、2年次前期、2年次後期。",
+            target_words=550,
+            key_points=["1年次前期", "1年次後期", "2年次前期", "2年次後期"],
+            target_claims=[],
+            key_sources=[],
+            citation_plan=[],
+        ),
+    ]
+    outline = OutlineStructure(
+        title="研究計画書",
+        abstract="",
+        sections=sections,
+        paper_type="research_proposal",
+        structure_pattern="research_proposal",
+        evidence_map=[],
+    )
+
+    result = await OutlineQualityGateNode().check(
+        {**base_state, "document_type": "research_proposal", "outline": outline}
+    )
+
+    codes = {issue.code for issue in result["quality_issues"]}
+    assert "OUTLINE_MISSING_TARGET_CLAIMS" not in codes
+    assert "OUTLINE_MISSING_EVIDENCE_MAP" not in codes
+    assert result.get("status") != "waiting_human"
+
+
+@pytest.mark.asyncio
+async def test_outline_quality_gate_proposal_blocks_missing_schedule_phases(base_state):
+    schedule = SectionOutline(
+        title="研究計画・スケジュール",
+        description="1年次前期と1年次後期の計画を述べる。",
+        order=1,
+        purpose="二年間の計画を示す。",
+        content_summary="1年次前期、1年次後期。",
+        target_words=550,
+        key_points=["1年次前期", "1年次後期"],
+    )
+    outline = OutlineStructure(
+        title="研究計画書",
+        abstract="",
+        sections=[schedule],
+        paper_type="research_proposal",
+        structure_pattern="research_proposal",
+        evidence_map=[],
+    )
+
+    result = await OutlineQualityGateNode().check(
+        {**base_state, "document_type": "research_proposal", "outline": outline}
+    )
+
+    assert result["status"] == "waiting_human"
+    assert "PROPOSAL_SCHEDULE_PHASES_MISSING" in {
+        issue.code for issue in result["quality_issues"]
+    }

@@ -9,6 +9,12 @@ from langchain_openai import ChatOpenAI
 
 from ..agent_config import PromptsConfig
 from ..config import settings
+from ..document_profile import (
+    is_proposal_plan_sentence,
+    is_research_proposal,
+    is_schedule_section,
+    missing_schedule_phases,
+)
 from ..i18n import t
 from ..logging import get_logger
 from ..state import (
@@ -78,6 +84,7 @@ class ReviewerNode:
             return {"status": "failed", "error_message": "Review index out of bounds"}
 
         section = sections[index]
+        proposal_profile = is_research_proposal(state)
 
         logger.info("reviewing section", title=section.title)
 
@@ -118,7 +125,7 @@ class ReviewerNode:
         papers = state.get("papers", [])
         if papers and section.content:
             alignment_issues = await self._verify_citation_alignment(
-                section.title, section.content, papers
+                section.title, section.content, papers, proposal_profile=proposal_profile
             )
             if alignment_issues:
                 review.issues.extend(alignment_issues)
@@ -127,8 +134,10 @@ class ReviewerNode:
 
         claim_source_issues, claim_quality_issues = self._audit_claim_source_support(
             section.section_id,
+            section.title,
             section.content,
             state.get("claim_evidence_bindings", []),
+            proposal_profile=proposal_profile,
         )
         if claim_source_issues:
             review.issues.extend(claim_source_issues)
@@ -152,6 +161,7 @@ class ReviewerNode:
             section.title,
             section.content,
             state,
+            proposal_profile=proposal_profile,
         )
         quality_issues = [*quality_issues, *paragraph_quality_issues]
         if paragraph_issues:
@@ -170,6 +180,16 @@ class ReviewerNode:
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
+        if proposal_profile:
+            schedule_issues, schedule_quality_issues = self._audit_proposal_schedule(
+                section.section_id, section.title, section.content
+            )
+            quality_issues = [*quality_issues, *schedule_quality_issues]
+            if schedule_issues:
+                review.issues.extend(schedule_issues)
+                if review.approved:
+                    review = review.model_copy(update={"approved": False})
+
         record = {
             "section": section.title,
             "score": review.score,
@@ -178,8 +198,15 @@ class ReviewerNode:
         }
 
         if review.approved:
-            return await self._handle_approved(state, section, review, record)
-        return await self._handle_rejected(state, section, review, record, quality_issues)
+            result = await self._handle_approved(state, section, review, record)
+        else:
+            result = await self._handle_rejected(state, section, review, record, quality_issues)
+        if quality_issues and "quality_issues" not in result:
+            result["quality_issues"] = quality_issues
+        result["review_diagnostics"] = self._build_review_diagnostics(
+            review, quality_issues, proposal_profile
+        )
+        return result
 
     async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
         sections = state["sections"]
@@ -194,6 +221,7 @@ class ReviewerNode:
             return
 
         section = sections[index]
+        proposal_profile = is_research_proposal(state)
         yield NodeStreamEvent(type="progress", progress=f"reviewing:{section.title}")
 
         input_data = {
@@ -238,7 +266,7 @@ class ReviewerNode:
         if papers and section.content:
             yield NodeStreamEvent(type="progress", progress="verifying_citations")
             alignment_issues = await self._verify_citation_alignment(
-                section.title, section.content, papers
+                section.title, section.content, papers, proposal_profile=proposal_profile
             )
             if alignment_issues:
                 review.issues.extend(alignment_issues)
@@ -247,8 +275,10 @@ class ReviewerNode:
 
         claim_source_issues, claim_quality_issues = self._audit_claim_source_support(
             section.section_id,
+            section.title,
             section.content,
             state.get("claim_evidence_bindings", []),
+            proposal_profile=proposal_profile,
         )
         if claim_source_issues:
             review.issues.extend(claim_source_issues)
@@ -272,6 +302,7 @@ class ReviewerNode:
             section.title,
             section.content,
             state,
+            proposal_profile=proposal_profile,
         )
         quality_issues = [*quality_issues, *paragraph_quality_issues]
         if paragraph_issues:
@@ -290,6 +321,16 @@ class ReviewerNode:
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
+        if proposal_profile:
+            schedule_issues, schedule_quality_issues = self._audit_proposal_schedule(
+                section.section_id, section.title, section.content
+            )
+            quality_issues = [*quality_issues, *schedule_quality_issues]
+            if schedule_issues:
+                review.issues.extend(schedule_issues)
+                if review.approved:
+                    review = review.model_copy(update={"approved": False})
+
         record = {
             "section": section.title,
             "score": review.score,
@@ -303,6 +344,11 @@ class ReviewerNode:
             final_result = await self._handle_rejected(
                 state, section, review, record, quality_issues
             )
+        if quality_issues and "quality_issues" not in final_result:
+            final_result["quality_issues"] = quality_issues
+        final_result["review_diagnostics"] = self._build_review_diagnostics(
+            review, quality_issues, proposal_profile
+        )
 
         yield NodeStreamEvent(type="result", result=final_result)
 
@@ -331,20 +377,28 @@ class ReviewerNode:
         return issues
 
     async def _verify_citation_alignment(
-        self, section_title: str, content: str, papers: list[PaperMetadata]
+        self,
+        section_title: str,
+        content: str,
+        papers: list[PaperMetadata],
+        *,
+        proposal_profile: bool = False,
     ) -> list[ReviewIssue]:
         cited_numbers = {int(m) for m in CITATION_PATTERN.findall(content)}
         valid_cited = {n for n in cited_numbers if 1 <= n <= len(papers)}
         if not valid_cited:
             return []
 
+        content_for_alignment = (
+            self._cited_sentence_context(content) if proposal_profile else content
+        )
         numbered_papers = _build_numbered_papers_summary(papers)
         try:
             result = await invoke_with_retry(
                 self.citation_chain,
                 {
                     "section_title": section_title,
-                    "content": content,
+                    "content": content_for_alignment,
                     "numbered_papers": numbered_papers,
                 },
             )
@@ -365,8 +419,11 @@ class ReviewerNode:
     def _audit_claim_source_support(
         self,
         section_id: str,
+        section_title: str,
         content: str,
         bindings: list[ClaimEvidenceBinding],
+        *,
+        proposal_profile: bool = False,
     ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
         section_bindings = [binding for binding in bindings if binding.section_id == section_id]
         issues: list[ReviewIssue] = []
@@ -378,6 +435,9 @@ class ReviewerNode:
             bindings_by_citation.setdefault(binding.citation_number, []).append(binding)
 
         for claim in claims:
+            if proposal_profile and self._is_proposal_deferred_claim(claim, section_title):
+                continue
+
             if not claim.citation_numbers:
                 issue = ReviewIssue(
                     type="missing_citation",
@@ -407,12 +467,25 @@ class ReviewerNode:
                         suggestion="Bind the cited claim to an evidence packet before approval.",
                         location=f"[{citation_number}]",
                     )
-                    issues.append(issue)
-                    quality_issues.append(
-                        self._claim_quality_issue(
-                            "CLAIM_MISSING_EVIDENCE_PACKET", issue, section_id, claim
-                        )
+                    quality_issue = self._claim_quality_issue(
+                        "CLAIM_MISSING_EVIDENCE_PACKET", issue, section_id, claim
                     )
+                    if proposal_profile:
+                        quality_issues.append(
+                            quality_issue.model_copy(
+                                update={
+                                    "severity": "warning",
+                                    "details": {
+                                        **quality_issue.details,
+                                        "audit_source": "evidence_binding",
+                                        "deferred": True,
+                                    },
+                                }
+                            )
+                        )
+                    else:
+                        issues.append(issue)
+                        quality_issues.append(quality_issue)
                     continue
 
                 best_binding = max(
@@ -426,10 +499,26 @@ class ReviewerNode:
                 if best_binding.verdict == "supported" and best_binding.chunk_id:
                     continue
                 issue = self._unsupported_binding_issue(best_binding)
-                issues.append(issue)
-                quality_issues.append(
-                    self._claim_quality_issue("UNSUPPORTED_CLAIM", issue, section_id, claim)
+                quality_issue = self._claim_quality_issue(
+                    "UNSUPPORTED_CLAIM", issue, section_id, claim
                 )
+                if proposal_profile:
+                    quality_issues.append(
+                        quality_issue.model_copy(
+                            update={
+                                "severity": "warning",
+                                "details": {
+                                    **quality_issue.details,
+                                    "audit_source": "evidence_binding",
+                                    "deferred": True,
+                                    "binding_diagnostics": best_binding.diagnostics,
+                                },
+                            }
+                        )
+                    )
+                else:
+                    issues.append(issue)
+                    quality_issues.append(quality_issue)
 
         for binding in section_bindings:
             if binding.verdict == "supported" and binding.chunk_id:
@@ -440,19 +529,34 @@ class ReviewerNode:
             ):
                 continue
             issue = self._unsupported_binding_issue(binding)
-            issues.append(issue)
-            quality_issues.append(
-                self._claim_quality_issue(
-                    "UNSUPPORTED_CLAIM",
-                    issue,
-                    section_id,
-                    ExtractedClaim(
-                        text=binding.claim_text,
-                        citation_numbers=(binding.citation_number,),
-                        is_factual=True,
-                    ),
-                )
+            claim = ExtractedClaim(
+                text=binding.claim_text,
+                citation_numbers=(binding.citation_number,),
+                is_factual=True,
             )
+            quality_issue = self._claim_quality_issue(
+                "UNSUPPORTED_CLAIM",
+                issue,
+                section_id,
+                claim,
+            )
+            if proposal_profile:
+                quality_issues.append(
+                    quality_issue.model_copy(
+                        update={
+                            "severity": "warning",
+                            "details": {
+                                **quality_issue.details,
+                                "audit_source": "evidence_binding",
+                                "deferred": True,
+                                "binding_diagnostics": binding.diagnostics,
+                            },
+                        }
+                    )
+                )
+            else:
+                issues.append(issue)
+                quality_issues.append(quality_issue)
 
         return issues, quality_issues
 
@@ -473,6 +577,7 @@ class ReviewerNode:
             content=content,
             paper_type=paper_type,
             structure_pattern=structure_pattern,
+            document_type="research_proposal" if is_research_proposal(state) else "",
         )
 
         review_issues = [self._methodology_review_issue(finding) for finding in findings]
@@ -498,7 +603,7 @@ class ReviewerNode:
             severity="error",
             location=finding.location,
             blocking=False,
-            details={"section_id": section_id},
+            details={"section_id": section_id, "audit_source": "methodology"},
         )
 
     def _audit_paragraph_quality(
@@ -507,6 +612,8 @@ class ReviewerNode:
         section_title: str,
         content: str,
         state: AgentState,
+        *,
+        proposal_profile: bool = False,
     ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
         outline = state.get("outline")
         section_outline = None
@@ -519,6 +626,7 @@ class ReviewerNode:
             section_title=section_title,
             content=content,
             section_outline=section_outline,
+            proposal_profile=proposal_profile,
         )
 
         review_issues = [self._paragraph_review_issue(finding) for finding in findings]
@@ -544,7 +652,7 @@ class ReviewerNode:
             severity="error",
             location=finding.location,
             blocking=False,
-            details={"section_id": section_id},
+            details={"section_id": section_id, "audit_source": "paragraph_quality"},
         )
 
     def _audit_language_style(
@@ -577,7 +685,7 @@ class ReviewerNode:
             severity="error",
             location=finding.location,
             blocking=False,
-            details={"section_id": section_id},
+            details={"section_id": section_id, "audit_source": "language_style"},
         )
 
     def _unsupported_binding_issue(self, binding: ClaimEvidenceBinding) -> ReviewIssue:
@@ -623,8 +731,118 @@ class ReviewerNode:
                 "section_id": section_id,
                 "claim_text": claim.text,
                 "citation_numbers": list(claim.citation_numbers),
+                "audit_source": "claim_source",
             },
         )
+
+    def _audit_proposal_schedule(
+        self, section_id: str, section_title: str, content: str
+    ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
+        if not is_schedule_section(section_title):
+            return [], []
+
+        missing = missing_schedule_phases(content)
+        if not missing:
+            return [], []
+
+        issue = ReviewIssue(
+            type="format_issue",
+            description=(
+                "Research proposal schedule is incomplete; missing phases: "
+                + ", ".join(missing)
+            ),
+            suggestion=(
+                "Revise the schedule to cover 1年次前期, 1年次後期, 2年次前期, "
+                "and 2年次後期, with tasks and deliverables for each phase."
+            ),
+            location=section_title,
+        )
+        quality_issue = QualityIssue(
+            code="PROPOSAL_SCHEDULE_PHASES_MISSING",
+            message=issue.description,
+            severity="blocking",
+            location=section_title,
+            blocking=True,
+            details={
+                "section_id": section_id,
+                "audit_source": "structural",
+                "missing_phases": missing,
+            },
+        )
+        return [issue], [quality_issue]
+
+    def _is_proposal_deferred_claim(
+        self, claim: ExtractedClaim, section_title: str
+    ) -> bool:
+        return not claim.citation_numbers and is_proposal_plan_sentence(
+            claim.text, section_title
+        )
+
+    def _cited_sentence_context(self, content: str) -> str:
+        cited = [
+            claim.text
+            for claim in self.claim_extractor.extract_cited_claims(content)
+            if claim.citation_numbers
+        ]
+        if cited:
+            return "\n".join(cited)
+        return "\n".join(
+            line.strip() for line in content.splitlines() if CITATION_PATTERN.search(line)
+        )
+
+    def _build_review_diagnostics(
+        self,
+        review: ReviewResult,
+        quality_issues: list[QualityIssue],
+        proposal_profile: bool,
+    ) -> dict[str, Any]:
+        buckets: dict[str, list[dict[str, Any]]] = {
+            "structural_issues": [],
+            "citation_issues": [],
+            "evidence_binding_issues": [],
+            "style_issues": [],
+            "methodology_issues": [],
+        }
+        for review_issue in review.issues:
+            buckets[self._review_issue_bucket(review_issue)].append(review_issue.model_dump())
+        for quality_issue in quality_issues:
+            bucket = self._quality_issue_bucket(quality_issue)
+            item = quality_issue.model_dump()
+            if item not in buckets[bucket]:
+                buckets[bucket].append(item)
+        return {
+            **buckets,
+            "proposal_profile": proposal_profile,
+            "deferred_quality_issue_count": sum(
+                1 for issue in quality_issues if issue.details.get("deferred")
+            ),
+        }
+
+    def _review_issue_bucket(self, issue: ReviewIssue) -> str:
+        if issue.type in {"missing_citation", "citation_mismatch"}:
+            if (
+                "evidence packet" in issue.description
+                or "Claim-source support" in issue.description
+            ):
+                return "evidence_binding_issues"
+            return "citation_issues"
+        if issue.type == "format_issue":
+            return "structural_issues"
+        if issue.type == "weak_argument":
+            return "style_issues"
+        return "structural_issues"
+
+    def _quality_issue_bucket(self, issue: QualityIssue) -> str:
+        source = str(issue.details.get("audit_source", ""))
+        if source in {"claim_source", "evidence_binding"}:
+            return "evidence_binding_issues"
+        if source == "methodology":
+            return "methodology_issues"
+        if source in {"paragraph_quality", "language_style"}:
+            return "style_issues"
+        if "CITATION" in issue.code:
+            return "citation_issues"
+        return "structural_issues"
 
     async def _handle_approved(
         self, state: AgentState, section: Any, review: ReviewResult, record: dict[str, Any]

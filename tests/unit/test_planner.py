@@ -572,3 +572,79 @@ async def test_planner_prompt_uses_paper_summaries_and_structure_controls(
     assert captured_input["structure_pattern"] == "theoretical_analysis"
     assert captured_input["target_word_count"] == "6000"
     assert "Writing locale: zh-CN" in captured_input["style_guidance"]
+
+
+@pytest.mark.asyncio
+async def test_planner_research_proposal_profile_controls_prompt(
+    mock_llm, mock_prompts, base_state
+):
+    captured_input: dict = {}
+
+    async def capture_invoke(chain, input_data):  # type: ignore[override]
+        captured_input.update(input_data)
+        return _make_llm_result(
+            title="研究計画書",
+            sections=[
+                {
+                    "title": "研究目的",
+                    "description": "目的",
+                    "order": 1,
+                    "purpose": "目的を示す。",
+                    "content_summary": "目的。",
+                    "target_words": 400,
+                    "transition_to_next": "方法へ接続する。",
+                }
+            ],
+        )
+
+    state = cast(
+        AgentState,
+        {
+            **base_state,
+            "document_type": "research_proposal",
+            "language": "ja",
+            "status": "planning",
+        },
+    )
+
+    with patch("seele_scholar_agent.nodes.planner.invoke_with_retry", side_effect=capture_invoke):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state)
+
+    assert captured_input["paper_type"] == "research_proposal"
+    assert captured_input["structure_pattern"] == "research_proposal"
+    assert captured_input["target_word_count"] == "2200"
+    assert "Japanese graduate-school research proposal" in captured_input["style_guidance"]
+    outline = result["outline"]
+    assert outline.paper_type == "research_proposal"
+    assert outline.structure_pattern == "research_proposal"
+    assert any(section.title == "研究計画・スケジュール" for section in outline.sections)
+
+
+@pytest.mark.asyncio
+async def test_planner_research_proposal_failure_uses_proposal_outline(
+    mock_llm, mock_prompts, base_state
+):
+    state = cast(
+        AgentState,
+        {
+            **base_state,
+            "document_type": "research_proposal",
+            "language": "ja",
+            "topic": "ゲーム音響における感情曲線設計",
+            "status": "planning",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        side_effect=Exception("planner failed"),
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state)
+
+    outline = result["outline"]
+    titles = [section.title for section in outline.sections]
+    assert outline.paper_type == "research_proposal"
+    assert len(titles) == 5
+    assert "研究計画・スケジュール" in titles

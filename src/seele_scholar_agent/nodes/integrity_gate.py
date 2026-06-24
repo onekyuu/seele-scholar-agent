@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+from ..document_profile import is_research_proposal
 from ..logging import get_logger
 from ..state import AgentState, ClaimEvidenceBinding, EvidencePacket, QualityIssue
 from . import CITATION_PATTERN, NodeStreamEvent
@@ -21,7 +22,7 @@ class IntegrityGateNode:
     async def check(self, state: AgentState) -> dict[str, Any]:
         quality_issues = list(state.get("quality_issues") or [])
         strict_issues: list[QualityIssue] = []
-        if state.get("strict_academic_mode", False):
+        if state.get("strict_academic_mode", False) and not is_research_proposal(state):
             strict_issues = self._strict_academic_issues(state)
             quality_issues.extend(strict_issues)
 
