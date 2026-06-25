@@ -618,7 +618,9 @@ async def test_planner_research_proposal_profile_controls_prompt(
     outline = result["outline"]
     assert outline.paper_type == "research_proposal"
     assert outline.structure_pattern == "research_proposal"
-    assert any(section.title == "研究計画・スケジュール" for section in outline.sections)
+    assert any(section.title == "研究目的" for section in outline.sections)
+    compound_sections = [section for section in outline.sections if "・" in section.title]
+    assert all("概要級" in section.description for section in compound_sections)
 
 
 @pytest.mark.asyncio
@@ -647,4 +649,37 @@ async def test_planner_research_proposal_failure_uses_proposal_outline(
     titles = [section.title for section in outline.sections]
     assert outline.paper_type == "research_proposal"
     assert len(titles) == 5
-    assert "研究計画・スケジュール" in titles
+    assert titles == ["研究背景", "先行研究と課題", "研究目的", "研究方法・計画", "期待される成果"]
+    method_plan = next(section for section in outline.sections if section.title == "研究方法・計画")
+    assert "実験 protocol" in method_plan.description
+    assert "統計検定" in method_plan.description
+
+
+@pytest.mark.asyncio
+async def test_planner_research_proposal_default_is_not_paper_heavy(
+    mock_llm, mock_prompts, base_state
+):
+    state = cast(
+        AgentState,
+        {
+            **base_state,
+            "document_type": "research_proposal",
+            "language": "ja",
+            "target_word_count": 2500,
+            "status": "planning",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.planner.invoke_with_retry",
+        side_effect=Exception("planner failed"),
+    ):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.plan(state)
+
+    titles = [section.title for section in result["outline"].sections]
+    joined = "\n".join(titles)
+    assert len(titles) == 5
+    assert "研究目的・研究方法" not in joined
+    assert "新規性・期待される成果" not in joined
+    assert "研究方法・計画" in titles

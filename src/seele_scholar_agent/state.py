@@ -144,6 +144,10 @@ class ReviewIssue(BaseModel):
     description: str
     suggestion: str
     location: str | None = None
+    blocking: bool = False
+    category: Literal["blocking", "content_quality", "citation_warning", "format"] = (
+        "content_quality"
+    )
 
 
 class ReviewResult(BaseModel):

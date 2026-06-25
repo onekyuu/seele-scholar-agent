@@ -1034,3 +1034,231 @@ async def test_proposal_unverified_binding_is_deferred_warning(
     assert result["quality_issues"][0].severity == "warning"
     assert result["quality_issues"][0].details["deferred"] is True
     assert result["review_diagnostics"]["deferred_quality_issue_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_proposal_method_plan_overview_can_pass_with_score_seven(
+    mock_llm, mock_prompts, base_state
+):
+    section = _written_section(
+        "研究方法・計画",
+        content=(
+            "本研究では、ゲーム音響制作の事例資料と Wwise を用い、感情曲線に沿った"
+            "音響設計手順を整理する。分析では既存作品の音響変化を比較し、制作した"
+            "プロトタイプを少人数の試聴で検証する。修士課程では前期に文献整理と"
+            "資料収集を行い、後期に実装と検証を進める計画である。"
+        ),
+        index=0,
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "document_type": "research_proposal",
+            "language": "ja",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={
+            "approved": False,
+            "score": 7,
+            "issues": [
+                {
+                    "type": "weak_argument",
+                    "description": "Method lacks paper-level protocol details.",
+                    "suggestion": "Add variables and statistical tests.",
+                }
+            ],
+            "summary": "Compact but feasible.",
+        },
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "completed"
+    assert result["current_review"]["approved"] is True
+    assert result["review_diagnostics"]["blocking_issue_count"] == 0
+    assert result["review_diagnostics"]["compound_title_detected"] is True
+
+
+@pytest.mark.asyncio
+async def test_proposal_high_score_citation_warning_is_not_blocking(
+    mock_llm, mock_prompts, base_state
+):
+    section = _written_section(
+        "研究背景",
+        content="研究背景として、ゲーム音響設計では感情変化の扱いが重要である。",
+        index=0,
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "document_type": "research_proposal",
+            "language": "ja",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={
+            "approved": False,
+            "score": 8,
+            "issues": [
+                {
+                    "type": "missing_citation",
+                    "description": "Background claim should cite prior work.",
+                    "suggestion": "Add a citation.",
+                }
+            ],
+            "summary": "Mostly acceptable.",
+        },
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "completed"
+    assert result["current_review"]["approved"] is True
+    issue = result["current_review"]["issues"][0]
+    assert issue["blocking"] is False
+    assert issue["category"] == "citation_warning"
+
+
+@pytest.mark.asyncio
+async def test_proposal_novelty_outcome_compound_accepts_brief_outcome(
+    mock_llm, mock_prompts, base_state
+):
+    section = _written_section(
+        "新規性・期待される成果",
+        content=(
+            "本研究の新規性は、感情曲線を音響設計の操作可能な指針として扱う点にある。"
+            "期待される成果は、修士研究として再利用可能な制作手順と、申請先研究室での"
+            "作品分析に応用できる知見を示すことである。"
+        ),
+        index=0,
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "document_type": "research_proposal",
+            "language": "ja",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "completed"
+    assert result["current_review"]["approved"] is True
+    assert result["review_diagnostics"]["missing_core_tasks"] == []
+
+
+@pytest.mark.asyncio
+async def test_proposal_enumeration_mismatch_blocks_revision(
+    mock_llm, mock_prompts, base_state
+):
+    section = _written_section(
+        "期待される成果",
+        content=(
+            "期待される成果は三点である。第一に、制作手順を整理する。"
+            "第二に、研究室で議論できる分析観点を提示する。"
+        ),
+        index=0,
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "document_type": "research_proposal",
+            "language": "ja",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "writing"
+    assert result["current_review"]["approved"] is False
+    assert result["review_diagnostics"]["blocking_issue_count"] >= 1
+    assert any(
+        issue["blocking"] for issue in result["review_diagnostics"]["issue_categories"]["blocking"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_proposal_truncated_or_missing_core_task_blocks(
+    mock_llm, mock_prompts, base_state
+):
+    sections = [
+        _written_section(
+            "研究方法・計画",
+            content="本研究の目的は音響体験を明らかにすることである。",
+            index=0,
+        )
+    ]
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, sections, index=0),
+            "document_type": "research_proposal",
+            "language": "ja",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "writing"
+    assert result["current_review"]["approved"] is False
+    assert set(result["review_diagnostics"]["missing_core_tasks"]) >= {"method", "plan"}
+
+    truncated = sections[0].model_copy(
+        update={
+            "content": (
+                "本研究では、事例資料と制作ツールを用いて分析し、前期に資料収集を進める"
+            )
+        }
+    )
+    truncated_state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [truncated], index=0),
+            "document_type": "research_proposal",
+            "language": "ja",
+        },
+    )
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        result = await ReviewerNode(llm=mock_llm, prompts=mock_prompts).review(
+            truncated_state
+        )
+
+    assert result["status"] == "writing"
+    assert result["current_review"]["approved"] is False
+    assert any(
+        "truncated" in issue["description"]
+        for issue in result["review_diagnostics"]["issue_categories"]["blocking"]
+    )

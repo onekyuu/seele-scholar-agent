@@ -892,5 +892,9 @@ async def test_proposal_initial_draft_uses_proposal_prompt(
     ].content
     assert result["writer_diagnostics"]["writer_mode"] == "proposal_draft"
     assert result["writer_diagnostics"]["revision_mode"] is False
+    assert result["writer_diagnostics"]["section_title"] == "研究目的・研究課題"
+    assert result["writer_diagnostics"]["section_budget"] == 450
+    assert result["writer_diagnostics"]["compound_title_detected"] is True
     assert "日本大学院研究計画書" in rendered_user_prompt
     assert "申请者自身的问题意识" in rendered_user_prompt
+    assert "概要级信息" in rendered_user_prompt
