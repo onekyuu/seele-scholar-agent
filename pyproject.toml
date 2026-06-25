@@ -1,47 +1,43 @@
 [project]
 name = "seele-scholar-agent"
-version = "0.12.0"
+version = "0.12.1"
 description = "An academic paper writing agent based on LangGraph"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
-authors = [
-    {name = "Seele Team"}
-]
+license = { text = "MIT" }
+authors = [{ name = "Seele Team" }]
 keywords = ["langgraph", "agent", "academic-writing", "rag", "paper"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
 ]
 
 dependencies = [
-    "langgraph>=0.0.40",
-    "langchain-core>=0.1.0",
-    "langchain-openai>=0.0.5",
-    "langchain-community>=0.0.10",
-    "pydantic>=2.0.0",
-    "pydantic-settings>=2.0.0",
-    "python-dotenv>=1.0.0",
-    "structlog>=24.0.0",
-    "arxiv>=1.4.0",
-    "httpx>=0.28.1",
+  "langgraph>=0.0.40",
+  "langchain-core>=0.1.0",
+  "langchain-openai>=0.0.5",
+  "langchain-community>=0.0.10",
+  "pydantic>=2.0.0",
+  "pydantic-settings>=2.0.0",
+  "python-dotenv>=1.0.0",
+  "structlog>=24.0.0",
+  "arxiv>=1.4.0",
+  "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "respx>=0.21.0",
-    "ruff>=0.1.0",
-    "mypy>=1.8.0",
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+  "respx>=0.21.0",
+  "ruff>=0.1.0",
+  "mypy>=1.8.0",
 ]
 
-qdrant = [
-    "qdrant-client>=1.7.0",
-]
+qdrant = ["qdrant-client>=1.7.0"]
 
 [build-system]
 requires = ["hatchling"]
@@ -65,4 +61,3 @@ strict = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-
