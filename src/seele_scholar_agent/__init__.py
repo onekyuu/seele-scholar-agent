@@ -27,7 +27,7 @@ from .state import (
 )
 from .style_packs import LocaleStylePack, StyleReference
 
-__version__ = "0.12.3"
+__version__ = "0.12.4"
 
 __all__ = [
     "create_writing_graph",
