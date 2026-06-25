@@ -33,7 +33,7 @@ from .paragraph_quality_audit import ParagraphQualityAudit, ParagraphQualityFind
 
 logger = get_logger(__name__)
 
-_CLAIM_TEXT_MATCH_THRESHOLD = 0.65
+_CLAIM_TEXT_MATCH_THRESHOLD = settings.CLAIM_TEXT_MATCH_THRESHOLD
 
 
 def _build_numbered_papers_summary(papers: list[PaperMetadata]) -> str:

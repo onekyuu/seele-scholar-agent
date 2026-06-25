@@ -7,6 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from ..agent_config import PromptsConfig, RAGRetrieverFunc
+from ..config import settings
 from ..document_profile import is_research_proposal, is_schedule_section
 from ..i18n import t
 from ..logging import get_logger
@@ -390,9 +391,9 @@ class CitationBinder:
     ) -> Literal["supported", "weak", "unsupported", "unverified"]:
         if packet is None:
             return "unverified"
-        if score >= 0.35:
+        if score >= settings.CITATION_BINDER_SUPPORTED_THRESHOLD:
             return "supported"
-        if score >= 0.15:
+        if score >= settings.CITATION_BINDER_WEAK_THRESHOLD:
             return "weak"
         return "unsupported"
 
@@ -410,19 +411,19 @@ class WriterNode:
         self.proposal_revision_prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", prompts.writer_system_prompt),
-                ("user", _PROPOSAL_REVISION_USER_PROMPT),
+                ("user", prompts.proposal_revision_user_prompt or _PROPOSAL_REVISION_USER_PROMPT),
             ]
         )
         self.proposal_draft_prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", prompts.writer_system_prompt),
-                ("user", _PROPOSAL_DRAFT_USER_PROMPT),
+                ("user", prompts.proposal_writer_user_prompt or _PROPOSAL_DRAFT_USER_PROMPT),
             ]
         )
         self.academic_revision_prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", prompts.writer_system_prompt),
-                ("user", _ACADEMIC_REVISION_USER_PROMPT),
+                ("user", prompts.academic_revision_user_prompt or _ACADEMIC_REVISION_USER_PROMPT),
             ]
         )
         self.chain = self.prompt | self.llm

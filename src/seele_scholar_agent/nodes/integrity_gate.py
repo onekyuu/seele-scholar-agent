@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+from ..config import settings
 from ..document_profile import is_research_proposal
 from ..logging import get_logger
 from ..state import AgentState, ClaimEvidenceBinding, EvidencePacket, QualityIssue
@@ -8,8 +9,8 @@ from . import CITATION_PATTERN, NodeStreamEvent
 
 logger = get_logger(__name__)
 
-_STRICT_MIN_SUPPORT_SCORE = 0.35
-_STRICT_MIN_EVIDENCE_RELEVANCE = 0.2
+_STRICT_MIN_SUPPORT_SCORE = settings.STRICT_MIN_SUPPORT_SCORE
+_STRICT_MIN_EVIDENCE_RELEVANCE = settings.STRICT_MIN_EVIDENCE_RELEVANCE
 
 
 def _is_blocking_issue(issue: QualityIssue) -> bool:

@@ -10,6 +10,9 @@ class PromptsConfig(BaseModel):
     planner_user_prompt: str
     writer_system_prompt: str
     writer_user_prompt: str
+    proposal_writer_user_prompt: str | None = None
+    proposal_revision_user_prompt: str | None = None
+    academic_revision_user_prompt: str | None = None
     reviewer_system_prompt: str
     reviewer_user_prompt: str
     topic_proposer_system_prompt: str

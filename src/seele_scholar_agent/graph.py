@@ -1,5 +1,6 @@
 # ruff: noqa: I001
 
+from collections.abc import Sequence
 from typing import Literal
 
 from langchain_openai import ChatOpenAI
@@ -33,6 +34,8 @@ def create_writing_graph(
     semantic_scholar_key: str | None = None,
     openalex_email: str | None = None,
     extra_paper_retrievers: list[PaperSearchFunc] | None = None,
+    skip_topic_proposer: bool = False,
+    interrupt_after: Sequence[str] | None = ("topic_proposer", "planner"),
 ) -> CompiledStateGraph[AgentState, None, AgentState, AgentState]:
     topic_proposer = TopicProposerNode(llm=model, prompts=prompts)
     researcher = ResearcherNode(
@@ -64,8 +67,11 @@ def create_writing_graph(
     graph.add_node("reference_generator", reference_generator.generate)
     graph.add_node("integrity_gate", integrity_gate.check)
 
-    graph.add_edge(START, "topic_proposer")
-    graph.add_edge("topic_proposer", "researcher")
+    if skip_topic_proposer:
+        graph.add_edge(START, "researcher")
+    else:
+        graph.add_edge(START, "topic_proposer")
+        graph.add_edge("topic_proposer", "researcher")
     graph.add_edge("researcher", "planner")
     graph.add_edge("planner", "outline_quality_gate")
     graph.add_conditional_edges(
@@ -98,7 +104,7 @@ def create_writing_graph(
     graph.add_edge("consistency_checker", "integrity_gate")
     graph.add_edge("integrity_gate", END)
 
-    return graph.compile(checkpointer=MemorySaver(), interrupt_after=["topic_proposer", "planner"])
+    return _compile_graph(graph, interrupt_after=interrupt_after)
 
 
 def create_simple_writing_graph(
@@ -108,6 +114,8 @@ def create_simple_writing_graph(
     semantic_scholar_key: str | None = None,
     openalex_email: str | None = None,
     extra_paper_retrievers: list[PaperSearchFunc] | None = None,
+    skip_topic_proposer: bool = False,
+    interrupt_after: Sequence[str] | None = None,
 ) -> CompiledStateGraph[AgentState, None, AgentState, AgentState]:
     topic_proposer = TopicProposerNode(llm=model, prompts=prompts)
     researcher = ResearcherNode(
@@ -139,8 +147,11 @@ def create_simple_writing_graph(
     graph.add_node("reference_generator", reference_generator.generate)
     graph.add_node("integrity_gate", integrity_gate.check)
 
-    graph.add_edge(START, "proposer")
-    graph.add_edge("proposer", "researcher")
+    if skip_topic_proposer:
+        graph.add_edge(START, "researcher")
+    else:
+        graph.add_edge(START, "proposer")
+        graph.add_edge("proposer", "researcher")
     graph.add_edge("researcher", "planner")
     graph.add_edge("planner", "outline_quality_gate")
     graph.add_conditional_edges(
@@ -170,7 +181,17 @@ def create_simple_writing_graph(
     graph.add_edge("consistency_checker", "integrity_gate")
     graph.add_edge("integrity_gate", END)
 
-    return graph.compile(checkpointer=MemorySaver())
+    return _compile_graph(graph, interrupt_after=interrupt_after)
+
+
+def _compile_graph(
+    graph: StateGraph[AgentState, None, AgentState, AgentState],
+    *,
+    interrupt_after: Sequence[str] | None,
+) -> CompiledStateGraph[AgentState, None, AgentState, AgentState]:
+    if interrupt_after is None:
+        return graph.compile(checkpointer=MemorySaver())
+    return graph.compile(checkpointer=MemorySaver(), interrupt_after=list(interrupt_after))
 
 
 def _has_blocking_quality_issues(state: AgentState) -> bool:

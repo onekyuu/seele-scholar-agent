@@ -754,6 +754,28 @@ def test_citation_binder_exposes_unverified_diagnostics(mock_llm, mock_prompts):
     assert bindings[0].diagnostics["source_paper_id"] == "p1"
 
 
+def test_writer_uses_prompt_overrides(mock_llm, mock_prompts):
+    prompts = mock_prompts.model_copy(
+        update={
+            "proposal_writer_user_prompt": "CUSTOM PROPOSAL DRAFT {topic}",
+            "proposal_revision_user_prompt": "CUSTOM PROPOSAL REVISION {topic}",
+            "academic_revision_user_prompt": "CUSTOM ACADEMIC REVISION {topic}",
+        }
+    )
+
+    node = WriterNode(llm=mock_llm, prompts=prompts)
+
+    assert "CUSTOM PROPOSAL DRAFT X" in node.proposal_draft_prompt.format(
+        topic="X", language="English"
+    )
+    assert "CUSTOM PROPOSAL REVISION X" in node.proposal_revision_prompt.format(
+        topic="X", language="English"
+    )
+    assert "CUSTOM ACADEMIC REVISION X" in node.academic_revision_prompt.format(
+        topic="X", language="English"
+    )
+
+
 @pytest.mark.asyncio
 async def test_academic_revision_uses_revision_prompt(
     mock_llm, mock_prompts, state_with_outline
