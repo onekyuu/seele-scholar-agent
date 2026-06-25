@@ -1201,6 +1201,44 @@ async def test_proposal_enumeration_mismatch_blocks_revision(
 
 
 @pytest.mark.asyncio
+async def test_proposal_japanese_stage_enumeration_is_recognized(
+    mock_llm, mock_prompts, base_state
+):
+    section = _written_section(
+        "研究方法・計画",
+        content=(
+            "本研究は三段階で進める。第一段階ではWwise上でRTPC制御を実装する。"
+            "第二段階では感情次元から音楽特徴量への対応を整理する。"
+            "第三段階では参加者評価により没入感と感情一致度を検証する。"
+        ),
+        index=0,
+    )
+    state = cast(
+        AgentState,
+        {
+            **_make_state_with_written_section(base_state, [section], index=0),
+            "document_type": "research_proposal",
+            "language": "ja",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value={"approved": True, "score": 8, "issues": [], "summary": "Good."},
+    ):
+        node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.review(state)
+
+    assert result["status"] == "completed"
+    assert result["current_review"]["approved"] is True
+    assert not any(
+        issue["code"] == "PROPOSAL_ENUMERATION_INCONSISTENT"
+        for issue in result.get("quality_issues", [])
+    )
+
+
+@pytest.mark.asyncio
 async def test_proposal_truncated_or_missing_core_task_blocks(
     mock_llm, mock_prompts, base_state
 ):
