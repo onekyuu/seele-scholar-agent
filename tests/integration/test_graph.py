@@ -277,3 +277,29 @@ async def test_graph_topic_proposer_populates_topics(base_state, mock_prompts):
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": "g-test-006"}})
 
     assert len(result.get("proposed_topics", [])) >= 0
+
+
+@pytest.mark.asyncio
+async def test_graph_can_skip_topic_proposer(base_state, mock_prompts):
+    with respx.mock(assert_all_mocked=False, assert_all_called=False) as respx_mock:
+        _mock_http(respx_mock)
+
+        llm = _make_mock_llm(
+            [
+                AIMessage(content=_planner_response()),
+                AIMessage(content="Claim for Introduction content."),
+                AIMessage(content=_reviewer_response(approved=True)),
+            ]
+        )
+
+        graph = create_simple_writing_graph(
+            model=llm,
+            prompts=mock_prompts,
+            skip_topic_proposer=True,
+        )
+        state = {**base_state, "outline_approved": True}
+
+        result = await graph.ainvoke(state, config={"configurable": {"thread_id": "g-test-007"}})
+
+    assert result["status"] == "completed"
+    assert result.get("proposed_topics", []) == []

@@ -171,3 +171,36 @@ async def test_integrity_gate_strict_mode_blocks_unsupported_claim(base_state):
     codes = {issue.code for issue in result["quality_issues"]}
     assert result["status"] == "waiting_human"
     assert "STRICT_UNSUPPORTED_CLAIM" in codes
+
+
+@pytest.mark.asyncio
+async def test_integrity_gate_skips_strict_academic_checks_for_proposal(base_state):
+    section = SectionDraft(
+        section_id="s1",
+        title="研究背景",
+        content="先行研究を参照する [1]。",
+        order_index=1,
+        status="approved",
+    )
+    reference = ReferenceEntry(
+        number=1,
+        paper_id="p1",
+        title="Unverified Paper",
+        authors=["Author"],
+        formatted="[1] Author. Unverified Paper",
+    )
+
+    node = IntegrityGateNode()
+    result = await node.check(
+        {
+            **base_state,
+            "document_type": "research_proposal",
+            "strict_academic_mode": True,
+            "sections": [section],
+            "references": [reference],
+            "claim_evidence_bindings": [],
+        }
+    )
+
+    assert result["status"] == "completed"
+    assert result["quality_issues"] == []

@@ -1,11 +1,10 @@
-"""Unit tests for FinalizerNode — FIN-01 through FIN-05."""
+"""Unit tests for FinalizerNode - FIN-01 through FIN-05."""
 
 from typing import Literal, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
-
 from seele_scholar_agent.nodes.finalizer import FinalizerNode
 from seele_scholar_agent.state import AgentState, SectionDraft
 
@@ -168,3 +167,33 @@ async def test_finalizer_matches_english_titles(mock_llm, mock_prompts, base_sta
     assert len(auto_generated) == 2
     titles = {s.title for s in auto_generated}
     assert titles == {"Abstract", "Conclusion"}
+
+
+@pytest.mark.asyncio
+async def test_finalizer_skips_auto_generation_for_research_proposal(
+    mock_llm, mock_prompts, base_state
+):
+    sections = [
+        _make_section("要旨", status="pending", order_index=1),
+        _make_section("研究目的", status="approved", content="目的。", order_index=2),
+    ]
+    state = cast(
+        AgentState,
+        {
+            **base_state,
+            "document_type": "research_proposal",
+            "sections": sections,
+            "language": "ja",
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.finalizer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=AIMessage(content="Should not be generated."),
+    ) as invoke:
+        node = FinalizerNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.finalize(state)
+
+    invoke.assert_not_awaited()
+    assert result == {"status": "completed"}

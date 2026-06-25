@@ -155,6 +155,27 @@ _SIGNIFICANCE_CLAIM_MARKERS = (
 )
 _BACKGROUND_CLAIM_MARKERS = ("prior work", "previous studies", "existing literature", "相关工作")
 _AUTHOR_RESULT_MARKERS = ("our ", "we ", "this study", "the experiment", "实验", "本文")
+_PROPOSAL_RESULT_MARKERS = (
+    "results show",
+    "result shows",
+    "experiment showed",
+    "experiments showed",
+    "we found",
+    "we achieved",
+    "achieved",
+    "outperformed",
+    "improved by",
+    "結果は",
+    "結果が",
+    "実験結果",
+    "示した",
+    "達成した",
+    "上回った",
+    "改善した",
+    "结果显示",
+    "实验表明",
+    "我们发现",
+)
 
 
 @dataclass(frozen=True)
@@ -176,7 +197,10 @@ class MethodologyAudit:
         content: str,
         paper_type: str = "",
         structure_pattern: str = "",
+        document_type: str = "",
     ) -> list[MethodologyAuditFinding]:
+        if self._is_proposal_without_completed_results(content, document_type):
+            return []
         if not self._should_audit(section_title, content, paper_type, structure_pattern):
             return []
 
@@ -259,6 +283,18 @@ class MethodologyAudit:
             )
 
         return findings
+
+    def _is_proposal_without_completed_results(
+        self, content: str, document_type: str
+    ) -> bool:
+        normalized_type = document_type.casefold().replace("-", "_").replace(" ", "_")
+        if "research_proposal" not in normalized_type and normalized_type not in {
+            "proposal",
+            "研究計画書",
+        }:
+            return False
+        lowered = content.casefold()
+        return not any(marker.casefold() in lowered for marker in _PROPOSAL_RESULT_MARKERS)
 
     def _should_audit(
         self, section_title: str, content: str, paper_type: str, structure_pattern: str

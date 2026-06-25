@@ -5,22 +5,23 @@ from typing import Any, Literal, TypedDict
 
 from langchain_core.runnables import Runnable
 
+from ..config import settings
 from ..logging import get_logger
 
 logger = get_logger(__name__)
 
-HTTP_TIMEOUT = 30.0
-ARXIV_RATE_LIMIT_DELAY = 3.0
-LLM_MAX_RETRIES = 2
-LLM_RETRY_BASE_DELAY = 1.0
-API_MAX_RETRIES = 3
-API_RETRY_BASE_DELAY = 3.0
+HTTP_TIMEOUT = settings.HTTP_TIMEOUT
+ARXIV_RATE_LIMIT_DELAY = settings.ARXIV_RATE_LIMIT_DELAY
+LLM_MAX_RETRIES = settings.LLM_MAX_RETRIES
+LLM_RETRY_BASE_DELAY = settings.LLM_RETRY_BASE_DELAY
+API_MAX_RETRIES = settings.API_MAX_RETRIES
+API_RETRY_BASE_DELAY = settings.API_RETRY_BASE_DELAY
 
-PREVIOUS_SECTION_MAX_CHARS = 500
+PREVIOUS_SECTION_MAX_CHARS = settings.PREVIOUS_SECTION_MAX_CHARS
 # Writer 节点为每章生成摘要的最大字符数（约 150 tokens，用于后续章节的上下文）
-SECTION_SUMMARY_MAX_CHARS = 600
+SECTION_SUMMARY_MAX_CHARS = settings.SECTION_SUMMARY_MAX_CHARS
 # Researcher 在 paper_summaries 中每篇文献 abstract 部分的最大字符数
-PAPER_SUMMARY_ABSTRACT_CHARS = 300
+PAPER_SUMMARY_ABSTRACT_CHARS = settings.PAPER_SUMMARY_ABSTRACT_CHARS
 
 CITATION_PATTERN = re.compile(r"\[(\d+)\]")
 

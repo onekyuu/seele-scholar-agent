@@ -1,14 +1,16 @@
 from collections.abc import AsyncIterator
 from typing import Any
 
+from ..config import settings
+from ..document_profile import is_research_proposal
 from ..logging import get_logger
 from ..state import AgentState, ClaimEvidenceBinding, EvidencePacket, QualityIssue
 from . import CITATION_PATTERN, NodeStreamEvent
 
 logger = get_logger(__name__)
 
-_STRICT_MIN_SUPPORT_SCORE = 0.35
-_STRICT_MIN_EVIDENCE_RELEVANCE = 0.2
+_STRICT_MIN_SUPPORT_SCORE = settings.STRICT_MIN_SUPPORT_SCORE
+_STRICT_MIN_EVIDENCE_RELEVANCE = settings.STRICT_MIN_EVIDENCE_RELEVANCE
 
 
 def _is_blocking_issue(issue: QualityIssue) -> bool:
@@ -21,7 +23,7 @@ class IntegrityGateNode:
     async def check(self, state: AgentState) -> dict[str, Any]:
         quality_issues = list(state.get("quality_issues") or [])
         strict_issues: list[QualityIssue] = []
-        if state.get("strict_academic_mode", False):
+        if state.get("strict_academic_mode", False) and not is_research_proposal(state):
             strict_issues = self._strict_academic_issues(state)
             quality_issues.extend(strict_issues)
 

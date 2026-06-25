@@ -85,6 +85,7 @@ class ParagraphQualityAudit:
         section_title: str,
         content: str,
         section_outline: SectionOutline | None = None,
+        proposal_profile: bool = False,
     ) -> list[ParagraphQualityFinding]:
         paragraphs = self._paragraphs(content)
         findings: list[ParagraphQualityFinding] = []
@@ -93,7 +94,8 @@ class ParagraphQualityAudit:
         findings.extend(
             self._target_claim_findings(content, section_outline, section_title)
         )
-        findings.extend(self._structure_findings(paragraphs, section_title))
+        if not proposal_profile:
+            findings.extend(self._structure_findings(paragraphs, section_title))
         return findings
 
     def _paragraphs(self, content: str) -> list[str]:

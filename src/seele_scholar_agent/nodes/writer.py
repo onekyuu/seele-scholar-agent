@@ -1,11 +1,14 @@
 import re
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from ..agent_config import PromptsConfig, RAGRetrieverFunc
+from ..config import settings
+from ..document_profile import is_research_proposal, is_schedule_section
 from ..i18n import t
 from ..logging import get_logger
 from ..state import (
@@ -36,6 +39,137 @@ from .material_registry import (
 logger = get_logger(__name__)
 
 _WORD_RE = re.compile(r"[A-Za-z0-9_\u4e00-\u9fff]+")
+_BUDGET_RE = re.compile(
+    r"(\d+\s*(?:-\s*\d+\s*)?(?:字|文字|語|words?)|全文|预算|予算|budget|target_words|字数|字數)",
+    re.IGNORECASE,
+)
+
+_PROPOSAL_REVISION_USER_PROMPT = """研究主题：{topic}
+
+目标语言：{language}
+
+当前章节：{section_title}
+章节描述与长度约束：
+{section_description}
+
+论文/计划书大纲：
+{outline_json}
+
+已完成章节摘要（用于保持前后连贯，避免重复）：
+{previous_sections}
+
+当前版本正文（必须在此基础上返修，不要自由重写成无关版本）：
+{current_content}
+
+审稿意见（逐条消化，每条都必须在新正文中得到处理）：
+{review_comments}
+
+可引用论文列表（引用时只能使用以下编号，格式为 [N]）：
+{numbered_papers}
+
+相关文献证据包：
+{rag_context}
+
+语言与文体指导：
+{style_guidance}
+
+请为 research_proposal（日本大学院研究計画書）输出该章节的完整替换正文，不要输出章节标题。
+
+返修要求：
+1. 逐条回应审稿意见；优先替换、压缩、合并、精确化已有内容，不要只是在末尾扩写。
+2. 保留章节在预算内的完整结构；若篇幅紧张，压缩背景和铺垫，保留研究动机、
+   研究对象、方法、计划、交付物等核心信息。
+3. 申请者自己的研究计划、时间安排、拟开展实验和执行安排不需要强行加引用；
+   引用只用于文献事实或已有研究结论。
+4. 若本章节是「研究計画・スケジュール」或 schedule/timeline 章节，必须覆盖
+   1年次前期、1年次後期、2年次前期、2年次後期。每个阶段至少写出具体任务
+   和交付物/里程碑；即使预算很紧，也不允许省略 2 年次。
+5. 直接输出正文，不要解释修改过程，不要使用 # 或 ## 标题符号。"""
+
+_PROPOSAL_DRAFT_USER_PROMPT = """研究主题：{topic}
+
+目标语言：{language}
+
+当前章节：{section_title}
+章节描述与长度约束：
+{section_description}
+
+研究计划书大纲：
+{outline_json}
+
+已完成章节摘要（供上下文参考，避免重复）：
+{previous_sections}
+
+可引用论文列表（引用时只能使用以下编号，格式为 [N]）：
+{numbered_papers}
+
+相关文献证据包：
+{rag_context}
+
+语言与文体指导：
+{style_guidance}
+
+请为 research_proposal（日本大学院研究計画書）撰写该章节正文，不要输出章节标题。
+
+写作要求：
+1. 按申请材料而非学术论文正文写作，突出研究动机、研究目的、研究方法、
+   可行性、计划性和申请者自身的问题意识。
+2. 申请者自己的计划、拟开展实验、时间安排、交付物和将来展望不需要引用。
+   引用只用于先行研究、背景事实或已有研究结论。
+3. 遵守章节描述和 outline 中的 target_words/总字数预算；篇幅紧张时压缩背景，
+   不要省略章节核心任务。
+4. 若本章节是「研究計画・スケジュール」或 schedule/timeline 章节，必须覆盖
+   1年次前期、1年次後期、2年次前期、2年次後期。每个阶段至少写出具体任务
+   和交付物/里程碑。
+5. 直接输出正文，不要解释写作过程，不要使用 # 或 ## 标题符号。"""
+
+_ACADEMIC_REVISION_USER_PROMPT = """论文主题：{topic}
+
+目标语言：{language}
+
+当前章节：{section_title}
+章节描述与长度约束：
+{section_description}
+
+论文大纲：
+{outline_json}
+
+已完成章节摘要（用于保持前后连贯，避免重复）：
+{previous_sections}
+
+当前版本正文（必须在此基础上返修，不要自由重写成无关版本）：
+{current_content}
+
+审稿意见（逐条消化，每条都必须在新正文中得到处理）：
+{review_comments}
+
+可引用论文列表（引用时只能使用以下编号，格式为 [N]）：
+{numbered_papers}
+
+相关文献证据包（事实性主张必须尽量绑定具体证据；不要编造来源）：
+{rag_context}
+
+语言与文体指导：
+{style_guidance}
+
+请输出该学术论文章节的完整替换正文，不要输出章节标题。
+
+返修要求：
+1. 逐条解决审稿意见；优先替换、压缩、合并、精确化现有段落，
+   不要只在末尾追加补丁。
+2. 保留并改进当前正文中已正确、已被引用支撑的内容。
+3. 对 missing_citation、citation_mismatch、unsupported claim，必须删除、
+   降级或改写无证据主张；需要保留的事实性主张必须使用有效 [N] 引用。
+4. 对 methodology/statistics 意见，补足样本量、数据集、baseline、指标定义、
+   显著性/不确定性或实验边界；若无法由证据支持，应改写为保守表述。
+5. 保持章节结构完整、段落衔接清楚，并遵守章节描述中的长度预算。
+6. 直接输出正文，不要解释修改过程，不要使用 # 或 ## 标题符号。"""
+
+
+@dataclass(frozen=True)
+class PacketSelection:
+    packet: EvidencePacket | None
+    diagnostics: dict[str, Any]
 
 
 def _generate_section_summary(title: str, content: str) -> str:
@@ -176,7 +310,10 @@ class CitationBinder:
                 if key in seen:
                     continue
                 seen.add(key)
-                packet = self._select_packet(citation_number, claim_text, papers, evidence_packets)
+                selection = self._select_packet(
+                    citation_number, claim_text, papers, evidence_packets
+                )
+                packet = selection.packet
                 score = self._support_score(claim_text, packet)
                 bindings.append(
                     ClaimEvidenceBinding(
@@ -187,6 +324,7 @@ class CitationBinder:
                         source_paper_id=self._source_paper_id(citation_number, papers, packet),
                         support_score=score,
                         verdict=self._verdict(score, packet),
+                        diagnostics=selection.diagnostics,
                     )
                 )
         return bindings
@@ -203,27 +341,36 @@ class CitationBinder:
         claim_text: str,
         papers: list[PaperMetadata],
         evidence_packets: list[EvidencePacket],
-    ) -> EvidencePacket | None:
-        if not evidence_packets:
-            return None
-
+    ) -> PacketSelection:
         source_paper_id = None
         if 1 <= citation_number <= len(papers):
             source_paper_id = papers[citation_number - 1].paper_id
 
+        diagnostics: dict[str, Any] = {
+            "evidence_packet_count": len(evidence_packets),
+            "candidate_count": 0,
+            "source_paper_id_match": False,
+            "source_paper_id": source_paper_id,
+        }
+        if not evidence_packets:
+            return PacketSelection(packet=None, diagnostics=diagnostics)
+
         candidates = [
             packet for packet in evidence_packets if packet.source_paper_id == source_paper_id
         ]
+        diagnostics["source_paper_id_match"] = source_paper_id is not None and bool(candidates)
         if not candidates:
             candidates = evidence_packets
+        diagnostics["candidate_count"] = len(candidates)
 
-        return max(
+        packet = max(
             candidates,
             key=lambda packet: (
                 _token_overlap_score(claim_text, packet.quote),
                 packet.relevance_score,
             ),
         )
+        return PacketSelection(packet=packet, diagnostics=diagnostics)
 
     def _source_paper_id(
         self, citation_number: int, papers: list[PaperMetadata], packet: EvidencePacket | None
@@ -244,9 +391,9 @@ class CitationBinder:
     ) -> Literal["supported", "weak", "unsupported", "unverified"]:
         if packet is None:
             return "unverified"
-        if score >= 0.35:
+        if score >= settings.CITATION_BINDER_SUPPORTED_THRESHOLD:
             return "supported"
-        if score >= 0.15:
+        if score >= settings.CITATION_BINDER_WEAK_THRESHOLD:
             return "weak"
         return "unsupported"
 
@@ -261,8 +408,32 @@ class WriterNode:
         self.prompt = ChatPromptTemplate.from_messages(
             [("system", prompts.writer_system_prompt), ("user", prompts.writer_user_prompt)]
         )
+        self.proposal_revision_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", prompts.writer_system_prompt),
+                ("user", prompts.proposal_revision_user_prompt or _PROPOSAL_REVISION_USER_PROMPT),
+            ]
+        )
+        self.proposal_draft_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", prompts.writer_system_prompt),
+                ("user", prompts.proposal_writer_user_prompt or _PROPOSAL_DRAFT_USER_PROMPT),
+            ]
+        )
+        self.academic_revision_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", prompts.writer_system_prompt),
+                ("user", prompts.academic_revision_user_prompt or _ACADEMIC_REVISION_USER_PROMPT),
+            ]
+        )
         self.chain = self.prompt | self.llm
+        self.proposal_draft_chain = self.proposal_draft_prompt | self.llm
+        self.proposal_revision_chain = self.proposal_revision_prompt | self.llm
+        self.academic_revision_chain = self.academic_revision_prompt | self.llm
         self.draft_writer = DraftWriter(self.chain)
+        self.proposal_draft_writer = DraftWriter(self.proposal_draft_chain)
+        self.proposal_revision_writer = DraftWriter(self.proposal_revision_chain)
+        self.academic_revision_writer = DraftWriter(self.academic_revision_chain)
         self.citation_binder = CitationBinder()
         self.style_polisher = StylePolisher()
 
@@ -278,6 +449,9 @@ class WriterNode:
             }
 
         section = sections[current_index]
+        proposal_profile = is_research_proposal(state)
+        writer_mode = self._writer_mode(state, section)
+        revision_mode = self._has_revision_context(section)
 
         if section.status == "approved":
             return await self._move_to_next(state)
@@ -307,19 +481,19 @@ class WriterNode:
         )
 
         try:
-            raw_content = await self.draft_writer.draft(
-                self._build_draft_input(
-                    state,
-                    section,
-                    lang,
-                    outline_json,
-                    previous_sections,
-                    numbered_papers,
-                    rag_context,
-                    style_guidance,
-                    review_comments,
-                )
+            input_data = self._build_draft_input(
+                state,
+                section,
+                lang,
+                outline_json,
+                previous_sections,
+                numbered_papers,
+                rag_context,
+                style_guidance,
+                review_comments,
             )
+            writer = self._draft_writer_for_mode(writer_mode)
+            raw_content = await writer.draft(input_data)
             content = self.style_polisher.polish(raw_content)
         except Exception as e:
             logger.error("writing failed after retries", error=str(e))
@@ -353,6 +527,13 @@ class WriterNode:
             "section_summaries": updated_summaries,
             "claim_evidence_bindings": claim_evidence_bindings,
             "status": "reviewing",
+            "writer_diagnostics": {
+                "revision_mode": revision_mode,
+                "writer_mode": writer_mode,
+                "proposal_profile": proposal_profile,
+                "review_comment_count": len(section.review_comments),
+                "schedule_section": is_schedule_section(section.title),
+            },
         }
         if new_evidence_packets:
             result["evidence_packets"] = new_evidence_packets
@@ -374,6 +555,9 @@ class WriterNode:
             return
 
         section = sections[current_index]
+        proposal_profile = is_research_proposal(state)
+        writer_mode = self._writer_mode(state, section)
+        revision_mode = self._has_revision_context(section)
 
         if section.status == "approved":
             move_result = await self._move_to_next(state)
@@ -390,30 +574,27 @@ class WriterNode:
         _section_summaries: list[str] = list(state.get("section_summaries") or [])
         _paper_summaries: list[str] = state.get("paper_summaries") or []
 
-        input_data = {
-            "topic": state["topic"],
-            "language": t(lang, "language_name"),
-            "section_title": section.title,
-            "section_description": section.description,
-            "suggested_figures": self._build_suggested_figures(section, state),
-            "outline_json": self._build_outline_json(state.get("outline")),
-            "previous_sections": self._build_previous_sections_context(
+        input_data = self._build_draft_input(
+            state,
+            section,
+            lang,
+            self._build_outline_json(state.get("outline")),
+            self._build_previous_sections_context(
                 sections, current_index, _section_summaries
             ),
-            "numbered_papers": (
+            (
                 self._build_numbered_papers_from_summaries(_paper_summaries, state)
                 if _paper_summaries
                 else self._build_numbered_papers(state.get("papers", []), state)
             ),
-            "rag_context": rag_context,
-            "style_guidance": build_writer_style_context(
-                state, self._find_section_outline(state, section)
-            ),
-            "review_comments": self._build_review_comments(section),
-        }
+            rag_context,
+            build_writer_style_context(state, self._find_section_outline(state, section)),
+            self._build_review_comments(section),
+        )
 
         full_text = ""
-        async for event in _stream_llm_text(self.chain, input_data):
+        stream_chain = self._stream_chain_for_mode(writer_mode)
+        async for event in _stream_llm_text(stream_chain, input_data):
             full_text += event.get("token", "")
             yield event
 
@@ -441,6 +622,13 @@ class WriterNode:
             "section_summaries": _updated_summaries,
             "claim_evidence_bindings": claim_evidence_bindings,
             "status": "reviewing",
+            "writer_diagnostics": {
+                "revision_mode": revision_mode,
+                "writer_mode": writer_mode,
+                "proposal_profile": proposal_profile,
+                "review_comment_count": len(section.review_comments),
+                "schedule_section": is_schedule_section(section.title),
+            },
         }
         if new_evidence_packets:
             result["evidence_packets"] = new_evidence_packets
@@ -463,7 +651,7 @@ class WriterNode:
             "topic": state["topic"],
             "language": t(lang, "language_name"),
             "section_title": section.title,
-            "section_description": section.description,
+            "section_description": self._build_section_description(section),
             "suggested_figures": self._build_suggested_figures(section, state),
             "outline_json": outline_json,
             "previous_sections": previous_sections,
@@ -471,6 +659,7 @@ class WriterNode:
             "rag_context": rag_context,
             "style_guidance": style_guidance,
             "review_comments": review_comments,
+            "current_content": section.content or "无",
         }
 
     def _find_section_outline(
@@ -564,6 +753,9 @@ class WriterNode:
             content_summary = getattr(s, "content_summary", "")
             if content_summary:
                 lines.append(f"  Content summary: {content_summary}")
+            target_words = getattr(s, "target_words", None)
+            if target_words:
+                lines.append(f"  Target words/chars: {target_words}")
             target_claims = getattr(s, "target_claims", [])
             if target_claims:
                 lines.append(f"  Target claims: {'; '.join(target_claims)}")
@@ -621,6 +813,63 @@ class WriterNode:
         if not section.review_comments:
             return "无"
         return "\n".join([f"- {c}" for c in section.review_comments])
+
+    def _build_section_description(self, section: SectionDraft) -> str:
+        description = section.description.strip()
+        constraints: list[str] = []
+
+        if _BUDGET_RE.search(description):
+            constraints.append(
+                "Length constraint: follow the explicit budget in the section description "
+                "as the only hard length limit; ignore generic 200-500 defaults."
+            )
+        else:
+            constraints.append(
+                "Default length target: 200-500 words/characters as appropriate for the "
+                "target language, unless the outline or caller provides a stricter budget."
+            )
+
+        if is_schedule_section(section.title):
+            constraints.append(
+                "Schedule density: use compact wording but preserve the complete two-year "
+                "timeline, including 1年次前期, 1年次後期, 2年次前期, and 2年次後期."
+            )
+
+        if not description:
+            return "\n".join(constraints)
+        return f"{description}\n\n" + "\n".join(constraints)
+
+    def _has_revision_context(self, section: SectionDraft) -> bool:
+        return section.revision_count > 0 or bool(section.review_comments)
+
+    def _writer_mode(
+        self, state: AgentState, section: SectionDraft
+    ) -> Literal["draft", "academic_revision", "proposal_draft", "proposal_revision"]:
+        if is_research_proposal(state):
+            if self._has_revision_context(section):
+                return "proposal_revision"
+            return "proposal_draft"
+        if not self._has_revision_context(section):
+            return "draft"
+        return "academic_revision"
+
+    def _draft_writer_for_mode(self, mode: str) -> DraftWriter:
+        if mode == "proposal_revision":
+            return self.proposal_revision_writer
+        if mode == "proposal_draft":
+            return self.proposal_draft_writer
+        if mode == "academic_revision":
+            return self.academic_revision_writer
+        return self.draft_writer
+
+    def _stream_chain_for_mode(self, mode: str) -> Any:
+        if mode == "proposal_revision":
+            return self.proposal_revision_chain
+        if mode == "proposal_draft":
+            return self.proposal_draft_chain
+        if mode == "academic_revision":
+            return self.academic_revision_chain
+        return self.chain
 
     def _build_previous_sections_context(
         self,

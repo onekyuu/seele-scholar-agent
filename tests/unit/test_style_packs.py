@@ -63,3 +63,21 @@ def test_style_pack_override_replaces_default_guidance(base_state: AgentState):
 
     assert "Custom zh style" in context
     assert "Use a school-specific thesis style." in context
+
+
+def test_ja_research_proposal_style_guidance(base_state: AgentState):
+    state = AgentState(
+        **{
+            **base_state,
+            "language": "ja",
+            "document_type": "research_proposal",
+            "paper_type": "research_proposal",
+        }
+    )
+
+    context = build_writer_style_context(state)
+
+    assert "research_proposal" in context
+    assert "申請者固有の問題意識" in context
+    assert "二年次計画を省いたスケジュール" in context
+    assert "ja_research_proposal_1" in context

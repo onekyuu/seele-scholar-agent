@@ -12,6 +12,7 @@ from langchain_core.language_models import BaseLanguageModel
 from seele_scholar_agent.agent_config import PaperSearchFunc, PromptsConfig
 from seele_scholar_agent.state import AgentState, PaperMetadata
 
+from ..config import settings
 from ..logging import get_logger
 from . import (
     API_MAX_RETRIES,
@@ -30,7 +31,7 @@ from .material_registry import (
 logger = get_logger(__name__)
 
 # 保留在 state 中的 abstract 最大字符数（节省序列化体积）
-_PAPER_STATE_ABSTRACT_CHARS = 100
+_PAPER_STATE_ABSTRACT_CHARS = settings.PAPER_STATE_ABSTRACT_CHARS
 _DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
@@ -222,7 +223,7 @@ def _compress_papers(
 class ArxivRetriever:
     BASE_URL = "https://export.arxiv.org/api/query"
 
-    def __init__(self, top_k: int = 10):
+    def __init__(self, top_k: int = settings.RETRIEVER_TOP_K):
         self.top_k = top_k
 
     async def search(self, query: str) -> list[PaperMetadata]:
@@ -338,7 +339,7 @@ class ArxivRetriever:
 class OpenAlexRetriever:
     BASE_URL = "https://api.openalex.org/works"
 
-    def __init__(self, top_k: int = 10, email: str | None = None):
+    def __init__(self, top_k: int = settings.RETRIEVER_TOP_K, email: str | None = None):
         self.top_k = top_k
         self.email = email or "research@example.com"
 
@@ -447,7 +448,7 @@ class OpenAlexRetriever:
 class SemanticScholarRetriever:
     BASE_URL = "https://api.semanticscholar.org/graph/v1"
 
-    def __init__(self, api_key: str | None = None, top_k: int = 10):
+    def __init__(self, api_key: str | None = None, top_k: int = settings.RETRIEVER_TOP_K):
         self.api_key = api_key
         self.top_k = top_k
         self.headers: dict[str, str] = {"x-api-key": api_key} if api_key else {}
