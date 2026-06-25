@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     LLM_RETRY_BASE_DELAY: float = 1.0
     API_MAX_RETRIES: int = 3
     API_RETRY_BASE_DELAY: float = 3.0
+    RETRIEVER_MAX_RETRY_AFTER_SECONDS: float = 10.0
 
     PREVIOUS_SECTION_MAX_CHARS: int = 500
     SECTION_SUMMARY_MAX_CHARS: int = 600
