@@ -218,16 +218,16 @@ class PlannerNode:
     def _default_proposal_outline(self, topic: str) -> dict[str, Any]:
         sections = [
             {
-                "title": "研究背景・問題意識",
+                "title": "研究背景",
                 "description": (
-                    "研究テーマの背景、志望分野との接続、本研究固有の動機を"
-                    "約400-500字で述べる。"
+                    "申請審査に必要な背景、問題意識、研究テーマとの接続を"
+                    "約350-450字で簡潔に述べる。"
                 ),
                 "order": 1,
                 "purpose": "研究計画書の問題意識と研究動機を明確にする。",
-                "content_summary": "背景、問題意識、申請者固有の関心を説明する。",
-                "target_words": 450,
-                "key_points": ["研究背景", "固有動機", "未解決課題"],
+                "content_summary": "背景、問題意識、申請者固有の関心を簡潔に説明する。",
+                "target_words": 400,
+                "key_points": ["研究背景", "問題意識", "研究テーマとの接続"],
                 "target_claims": [],
                 "key_sources": [],
                 "citation_plan": [],
@@ -237,64 +237,76 @@ class PlannerNode:
                 "suggested_figures": [],
             },
             {
-                "title": "研究目的・研究課題",
-                "description": "研究目的、研究質問、対象範囲を約400-500字で具体化する。",
-                "order": 2,
-                "purpose": "本研究が何を明らかにするかを示す。",
-                "content_summary": "研究目的、RQ、研究対象、期待される貢献を述べる。",
-                "target_words": 450,
-                "key_points": ["研究目的", "研究質問", "貢献"],
-                "target_claims": [],
-                "key_sources": [],
-                "citation_plan": [],
-                "evidence_gaps": [],
-                "transition_to_next": "目的達成のための方法へ接続する。",
-                "section_style": {},
-                "suggested_figures": [],
-            },
-            {
-                "title": "研究方法",
-                "description": "分析対象、開発・検証方法、評価観点を約500-600字で説明する。",
-                "order": 3,
-                "purpose": "研究計画の実行可能性を示す。",
-                "content_summary": "データ、制作・分析手順、評価方法を説明する。",
-                "target_words": 550,
-                "key_points": ["研究対象", "方法", "評価観点"],
-                "target_claims": [],
-                "key_sources": [],
-                "citation_plan": [],
-                "evidence_gaps": [],
-                "transition_to_next": "方法を時系列の研究計画へ展開する。",
-                "section_style": {},
-                "suggested_figures": [],
-            },
-            {
-                "title": "研究計画・スケジュール",
+                "title": "先行研究と課題",
                 "description": (
-                    "1年次前期、1年次後期、2年次前期、2年次後期の各段階について、"
-                    "具体的作業と成果物を約500-600字で述べる。"
+                    "主要な先行研究の位置づけと残された課題を約400-500字で述べる。"
+                    "論文の関連研究章のように網羅せず、申請審査に必要な情報密度に絞る。"
+                ),
+                "order": 2,
+                "purpose": "本研究が取り組む課題の位置づけを示す。",
+                "content_summary": "先行研究の要点、限界、未解決課題を申請書向けに整理する。",
+                "target_words": 450,
+                "key_points": ["先行研究", "残された課題", "本研究の位置づけ"],
+                "target_claims": [],
+                "key_sources": [],
+                "citation_plan": [],
+                "evidence_gaps": [],
+                "transition_to_next": "課題を受けて研究目的へ接続する。",
+                "section_style": {},
+                "suggested_figures": [],
+            },
+            {
+                "title": "研究目的",
+                "description": (
+                    "本研究で明らかにしたいこと、研究対象、問いを約350-450字で"
+                    "具体化する。期待成果は概要に留め、方法章へ接続する。"
+                ),
+                "order": 3,
+                "purpose": "本研究が何を明らかにするかを示す。",
+                "content_summary": "研究目的、研究質問、対象範囲を簡潔に述べる。",
+                "target_words": 400,
+                "key_points": ["研究目的", "研究質問", "対象範囲"],
+                "target_claims": [],
+                "key_sources": [],
+                "citation_plan": [],
+                "evidence_gaps": [],
+                "transition_to_next": "目的達成のための方法と計画へ接続する。",
+                "section_style": {},
+                "suggested_figures": [],
+            },
+            {
+                "title": "研究方法・計画",
+                "description": (
+                    "使用する資料・ツール・方法、分析や検証の進め方、修士段階での"
+                    "実行可能性を約500-600字で述べる。複合タイトルの「計画」は"
+                    "概要級でよく、論文の方法章のような実験 protocol、詳細な変数設計、"
+                    "統計検定までは要求しない。"
                 ),
                 "order": 4,
-                "purpose": "二年間の修士研究としての実行計画を示す。",
-                "content_summary": "二年間の各学期の作業、検証、執筆、成果物を述べる。",
+                "purpose": "研究計画の方法と修士段階での実行可能性を示す。",
+                "content_summary": "資料、方法、検証方針、概略スケジュールを申請書向けに述べる。",
                 "target_words": 550,
-                "key_points": ["1年次前期", "1年次後期", "2年次前期", "2年次後期"],
+                "key_points": ["資料・ツール", "分析・検証方針", "修士段階での実行可能性"],
                 "target_claims": [],
                 "key_sources": [],
                 "citation_plan": [],
                 "evidence_gaps": [],
-                "transition_to_next": "計画全体の意義と将来展望へ接続する。",
+                "transition_to_next": "方法と計画を踏まえて期待される成果へ接続する。",
                 "section_style": {},
                 "suggested_figures": [],
             },
             {
-                "title": "期待される成果・将来展望",
-                "description": "期待される成果、研究科で学ぶ意義、将来展望を約300-400字で述べる。",
+                "title": "期待される成果",
+                "description": (
+                    "期待される成果、申請上の価値、将来展望を約250-350字で述べる。"
+                    "1-2個の具体的貢献でよく、論文の contribution section のような"
+                    "網羅的展開は不要。"
+                ),
                 "order": 5,
                 "purpose": "研究の意義と進学後の展望を締めくくる。",
-                "content_summary": "成果、応用可能性、将来展望を簡潔にまとめる。",
-                "target_words": 350,
-                "key_points": ["期待成果", "将来展望"],
+                "content_summary": "成果、申請価値、将来展望を簡潔にまとめる。",
+                "target_words": 300,
+                "key_points": ["期待成果", "申請価値"],
                 "target_claims": [],
                 "key_sources": [],
                 "citation_plan": [],
@@ -341,10 +353,17 @@ class PlannerNode:
             "",
             "Research proposal requirements:",
             "- Treat this as a Japanese graduate-school research proposal, not a paper.",
-            "- Plan 4-5 chapters for a complete 2000-2500 Japanese-character document.",
-            "- Include motivation, research purpose/questions, method, two-year schedule, "
-            "expected outcomes, and future direction.",
-            "- Schedule must cover 1年次前期, 1年次後期, 2年次前期, and 2年次後期.",
+            "- Plan a lightweight 4-5 chapter structure for a complete 2000-3000 "
+            "Japanese-character document.",
+            "- Prefer separate, single-task titles such as 研究背景, 先行研究と課題, "
+            "研究目的, 研究方法・計画, 期待される成果.",
+            "- Avoid heavy dual-task titles. If a compound title is used, its description "
+            "must say the second part only needs overview-level coverage, not a full "
+            "paper-style subsection.",
+            "- Include motivation, prior-work gap, research purpose/questions, method, "
+            "feasibility/plan, and expected outcomes at application-review density.",
+            "- Only explicit schedule/timeline sections must cover 1年次前期, 1年次後期, "
+            "2年次前期, and 2年次後期.",
             "- Do not require citations for the applicant's own plan, intended work, "
             "timeline, deliverables, or future evaluation.",
             "- Use citations only for prior-work/background claims.",
@@ -363,31 +382,10 @@ class PlannerNode:
                 "research_proposal",
             )
 
-        sections = sorted(outline.sections, key=lambda section: section.order)
-        has_schedule = any(
-            "スケジュール" in section.title or "schedule" in section.title.casefold()
-            for section in sections
-        )
-        if not has_schedule:
-            next_order = max(section.order for section in sections) + 1
-            schedule = self._build_section_outline(
-                {
-                    "title": "研究計画・スケジュール",
-                    "description": (
-                        "1年次前期、1年次後期、2年次前期、2年次後期の各段階について、"
-                        "具体的作業と成果物を述べる。"
-                    ),
-                    "order": next_order,
-                    "purpose": "二年間の修士研究としての実行計画を示す。",
-                    "content_summary": "二年間の各学期の作業、検証、執筆、成果物を述べる。",
-                    "target_words": 550,
-                    "key_points": ["1年次前期", "1年次後期", "2年次前期", "2年次後期"],
-                    "transition_to_next": "",
-                },
-                next_order,
-            )
-            sections.append(schedule)
-
+        sections = [
+            self._with_proposal_description_guard(section)
+            for section in sorted(outline.sections, key=lambda section: section.order)
+        ]
         evidence_map = [
             SectionEvidencePlan(
                 section_title=section.title,
@@ -406,6 +404,19 @@ class PlannerNode:
                 "evidence_map": evidence_map,
             }
         )
+
+    def _with_proposal_description_guard(self, section: SectionOutline) -> SectionOutline:
+        compound_markers = ("・", "/", "／", "&", " and ", "、")
+        title_lower = section.title.casefold()
+        if not any(marker in title_lower for marker in compound_markers):
+            return section
+        guard = (
+            " 複合タイトルの場合、第二要素は申請審査に必要な概要級のカバーでよく、"
+            "論文本文の独立小節のような完全展開は要求しない。"
+        )
+        if "概要級" in section.description or "overview-level" in section.description:
+            return section
+        return section.model_copy(update={"description": section.description + guard})
 
     def _build_papers_summary(
         self,

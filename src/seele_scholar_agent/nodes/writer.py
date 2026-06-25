@@ -8,7 +8,12 @@ from langchain_openai import ChatOpenAI
 
 from ..agent_config import PromptsConfig, RAGRetrieverFunc
 from ..config import settings
-from ..document_profile import is_research_proposal, is_schedule_section
+from ..document_profile import (
+    is_compound_section_title,
+    is_research_proposal,
+    is_schedule_section,
+    missing_proposal_core_tasks,
+)
 from ..i18n import t
 from ..logging import get_logger
 from ..state import (
@@ -61,7 +66,7 @@ _PROPOSAL_REVISION_USER_PROMPT = """研究主题：{topic}
 当前版本正文（必须在此基础上返修，不要自由重写成无关版本）：
 {current_content}
 
-审稿意见（逐条消化，每条都必须在新正文中得到处理）：
+审稿意见（优先处理 blocking；warning 可用压缩、弱化断言或删去不必要引用解决）：
 {review_comments}
 
 可引用论文列表（引用时只能使用以下编号，格式为 [N]）：
@@ -76,15 +81,23 @@ _PROPOSAL_REVISION_USER_PROMPT = """研究主题：{topic}
 请为 research_proposal（日本大学院研究計画書）输出该章节的完整替换正文，不要输出章节标题。
 
 返修要求：
-1. 逐条回应审稿意见；优先替换、压缩、合并、精确化已有内容，不要只是在末尾扩写。
-2. 保留章节在预算内的完整结构；若篇幅紧张，压缩背景和铺垫，保留研究动机、
-   研究对象、方法、计划、交付物等核心信息。
+1. 优先修复 blocking issue：缺少标题核心任务、结构断裂、数字枚举不一致、内容截断、
+   目的/方法/计划无法判断可行性。不要机械扩写所有 reviewer comments。
+2. 保留章节在预算内的完整结构；若篇幅紧张，压缩背景和铺垫，优先保留研究主题、
+   目的、方法可行性和计划。
 3. 申请者自己的研究计划、时间安排、拟开展实验和执行安排不需要强行加引用；
    引用只用于文献事实或已有研究结论。
-4. 若本章节是「研究計画・スケジュール」或 schedule/timeline 章节，必须覆盖
+4. 对非阻塞 missing_citation、citation_mismatch、unsupported claim，可通过弱化断言、
+   删除不必要引用、改为更谨慎表达解决，不要为了补引用而越写越长。
+5. 「研究方法」只需概要说明使用什么资料/工具/方法、如何验证或分析、为什么硕士阶段
+   可行；不要求完整实验 protocol、详细变量设计、统计检验细节。
+6. 「期待される成果」只需说明 1-2 个预期贡献或申请价值，不要写成论文 contribution
+   section。
+7. 避免模板式声明“三点”“三段階”，除非正文实际写出对应数量。
+8. 若本章节是明确的「研究計画・スケジュール」或 schedule/timeline 章节，必须覆盖
    1年次前期、1年次後期、2年次前期、2年次後期。每个阶段至少写出具体任务
    和交付物/里程碑；即使预算很紧，也不允许省略 2 年次。
-5. 直接输出正文，不要解释修改过程，不要使用 # 或 ## 标题符号。"""
+9. 直接输出正文，不要解释修改过程，不要使用 # 或 ## 标题符号。"""
 
 _PROPOSAL_DRAFT_USER_PROMPT = """研究主题：{topic}
 
@@ -113,15 +126,21 @@ _PROPOSAL_DRAFT_USER_PROMPT = """研究主题：{topic}
 
 写作要求：
 1. 按申请材料而非学术论文正文写作，突出研究动机、研究目的、研究方法、
-   可行性、计划性和申请者自身的问题意识。
+   可行性、计划性和申请者自身的问题意识。面向教授快速判断选题价值与可行性。
 2. 申请者自己的计划、拟开展实验、时间安排、交付物和将来展望不需要引用。
    引用只用于先行研究、背景事实或已有研究结论。
 3. 遵守章节描述和 outline 中的 target_words/总字数预算；篇幅紧张时压缩背景，
-   不要省略章节核心任务。
-4. 若本章节是「研究計画・スケジュール」或 schedule/timeline 章节，必须覆盖
+   优先保留研究主题、目的、方法可行性和计划，不要省略章节核心任务。
+4. 「研究方法」只需概要级说明：使用什么资料/工具/方法，如何验证或分析，为什么
+   硕士阶段可行。不要求完整实验 protocol、详细变量设计或统计检验细节。
+5. 「期待される成果」只需说明 1-2 个预期贡献或申请价值，不要求完整论文式
+   contribution section。
+6. 复合标题只需让两侧都有概要级信息，不要把每一侧扩写成完整论文小节。
+7. 避免模板式声明“三点”“三段階”，除非实际写出对应数量。
+8. 若本章节是明确的「研究計画・スケジュール」或 schedule/timeline 章节，必须覆盖
    1年次前期、1年次後期、2年次前期、2年次後期。每个阶段至少写出具体任务
    和交付物/里程碑。
-5. 直接输出正文，不要解释写作过程，不要使用 # 或 ## 标题符号。"""
+9. 直接输出正文，不要解释写作过程，不要使用 # 或 ## 标题符号。"""
 
 _ACADEMIC_REVISION_USER_PROMPT = """论文主题：{topic}
 
@@ -531,6 +550,14 @@ class WriterNode:
                 "revision_mode": revision_mode,
                 "writer_mode": writer_mode,
                 "proposal_profile": proposal_profile,
+                "section_title": section.title,
+                "section_budget": self._section_budget(section, section_outline),
+                "compound_title_detected": is_compound_section_title(section.title),
+                "missing_core_tasks": (
+                    missing_proposal_core_tasks(section.title, content)
+                    if proposal_profile
+                    else []
+                ),
                 "review_comment_count": len(section.review_comments),
                 "schedule_section": is_schedule_section(section.title),
             },
@@ -626,6 +653,16 @@ class WriterNode:
                 "revision_mode": revision_mode,
                 "writer_mode": writer_mode,
                 "proposal_profile": proposal_profile,
+                "section_title": section.title,
+                "section_budget": self._section_budget(
+                    section, self._find_section_outline(state, section)
+                ),
+                "compound_title_detected": is_compound_section_title(section.title),
+                "missing_core_tasks": (
+                    missing_proposal_core_tasks(section.title, content)
+                    if proposal_profile
+                    else []
+                ),
                 "review_comment_count": len(section.review_comments),
                 "schedule_section": is_schedule_section(section.title),
             },
@@ -838,6 +875,16 @@ class WriterNode:
         if not description:
             return "\n".join(constraints)
         return f"{description}\n\n" + "\n".join(constraints)
+
+    def _section_budget(
+        self, section: SectionDraft, section_outline: SectionOutline | None
+    ) -> int | str | None:
+        if section_outline is not None and section_outline.target_words is not None:
+            return section_outline.target_words
+        match = _BUDGET_RE.search(section.description)
+        if match:
+            return match.group(1)
+        return None
 
     def _has_revision_context(self, section: SectionDraft) -> bool:
         return section.revision_count > 0 or bool(section.review_comments)

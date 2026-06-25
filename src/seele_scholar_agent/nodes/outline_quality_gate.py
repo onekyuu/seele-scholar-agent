@@ -166,14 +166,26 @@ class OutlineQualityGateNode:
             )
 
         schedule_sections = [section for section in sections if is_schedule_section(section.title)]
-        if not schedule_sections:
+        plan_sections = [
+            section
+            for section in sections
+            if "計画" in section.title or "plan" in section.title.casefold()
+        ]
+        if not schedule_sections and not plan_sections:
             issues.append(
-                self._blocking_issue(
-                    "PROPOSAL_SCHEDULE_SECTION_MISSING",
-                    "Research proposal outline is missing a schedule section.",
-                    "outline.sections",
+                QualityIssue(
+                    code="PROPOSAL_PLAN_SECTION_MISSING",
+                    message=(
+                        "Research proposal outline should include method/plan or "
+                        "schedule information for feasibility review."
+                    ),
+                    severity="warning",
+                    location="outline.sections",
+                    blocking=False,
                 )
             )
+            return issues
+        if not schedule_sections:
             return issues
 
         schedule = schedule_sections[0]

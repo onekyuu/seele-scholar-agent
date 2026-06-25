@@ -17,10 +17,7 @@ _PROPOSAL_TYPES = {
 _SCHEDULE_TITLE_MARKERS = (
     "schedule",
     "timeline",
-    "research plan",
-    "研究計画",
     "スケジュール",
-    "計画",
     "时间表",
     "時間表",
 )
@@ -90,6 +87,64 @@ _SCHEDULE_PHASES: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 DEFAULT_PROPOSAL_TARGET_CHARS = 2200
 
+_COMPOUND_TITLE_SEPARATORS = ("・", "/", "／", "&", " and ", "、")
+
+_CORE_TASK_TITLE_MARKERS: dict[str, tuple[str, ...]] = {
+    "background": ("研究背景", "背景", "問題意識", "motivation", "background"),
+    "prior_work": ("先行研究", "既存研究", "課題", "literature", "prior work"),
+    "purpose": ("研究目的", "目的", "研究課題", "research question", "objective"),
+    "method": ("研究方法", "方法", "method"),
+    "plan": ("研究計画", "計画", "schedule", "timeline", "スケジュール"),
+    "novelty": ("新規性", "独自性", "novelty", "originality"),
+    "outcome": ("期待される成果", "期待成果", "成果", "貢献", "将来展望", "outcome"),
+}
+
+_CORE_TASK_CONTENT_MARKERS: dict[str, tuple[str, ...]] = {
+    "background": (
+        "背景",
+        "問題",
+        "必要",
+        "関心",
+        "動機",
+        "先行研究",
+        "既存研究",
+        "motivation",
+        "background",
+    ),
+    "prior_work": ("先行研究", "既存研究", "課題", "未解決", "限界", "prior work"),
+    "purpose": ("目的", "明らか", "解明", "目指", "研究課題", "問い", "RQ", "objective"),
+    "method": (
+        "方法",
+        "分析",
+        "検証",
+        "資料",
+        "データ",
+        "ツール",
+        "設計",
+        "実装",
+        "開発",
+        "調査",
+        "比較",
+        "用い",
+        "method",
+    ),
+    "plan": (
+        "計画",
+        "予定",
+        "段階",
+        "年次",
+        "前期",
+        "後期",
+        "修士",
+        "期間",
+        "進め",
+        "schedule",
+        "timeline",
+    ),
+    "novelty": ("新規", "独自", "特徴", "差別", "未解決", "novel", "original"),
+    "outcome": ("成果", "貢献", "期待", "価値", "意義", "展望", "可能性", "outcome"),
+}
+
 
 def get_document_type(state: AgentState | Mapping[str, Any]) -> str:
     """Resolve the caller-supplied document type from known state locations."""
@@ -146,6 +201,36 @@ def get_target_word_count(state: AgentState | Mapping[str, Any]) -> int | None:
 def is_schedule_section(section_title: str) -> bool:
     lowered = section_title.casefold()
     return any(marker.casefold() in lowered for marker in _SCHEDULE_TITLE_MARKERS)
+
+
+def is_compound_section_title(section_title: str) -> bool:
+    lowered = section_title.casefold()
+    return any(separator in lowered for separator in _COMPOUND_TITLE_SEPARATORS)
+
+
+def proposal_core_tasks_for_title(section_title: str) -> list[str]:
+    """Infer the application-review tasks implied by a proposal section title."""
+
+    lowered = section_title.casefold()
+    tasks: list[str] = []
+    for task, markers in _CORE_TASK_TITLE_MARKERS.items():
+        if any(marker.casefold() in lowered for marker in markers):
+            tasks.append(task)
+    if not tasks and "研究" in section_title:
+        return ["purpose"]
+    return tasks
+
+
+def missing_proposal_core_tasks(section_title: str, content: str) -> list[str]:
+    """Return title-implied proposal tasks absent at overview level from section content."""
+
+    lowered = content.casefold()
+    missing: list[str] = []
+    for task in proposal_core_tasks_for_title(section_title):
+        markers = _CORE_TASK_CONTENT_MARKERS[task]
+        if not any(marker.casefold() in lowered for marker in markers):
+            missing.append(task)
+    return missing
 
 
 def missing_schedule_phases(content: str) -> list[str]:
