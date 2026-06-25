@@ -1007,7 +1007,7 @@ class ReviewerNode:
 
     def _actual_enumeration_count(self, content: str) -> int:
         markers = re.findall(
-            r"(?:第[一二三四五]に|[一二三四五]つ目|[（(]?[1-5][）).、]|"
+            r"(?:第[一二三四五](?:に|段階|ステップ)|[一二三四五]つ目|[（(]?[1-5][）).、]|"
             r"\b(?:first|second|third|fourth|fifth)\b)",
             content,
             re.IGNORECASE,
