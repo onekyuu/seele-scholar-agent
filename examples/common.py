@@ -39,12 +39,19 @@ Style guidance:
 Papers:
 {papers_summary}
 
+Allowed paper_type values:
+empirical, literature_review, theoretical, case_study, policy_brief, conference,
+research_proposal, auto
+
+Allowed structure_pattern values:
+IMRaD, thematic_review, theoretical_analysis, case_study, research_proposal, auto
+
 Return JSON:
 {{
   "title": "{title_placeholder}",
   "abstract": "{abstract_placeholder}",
-  "paper_type": "empirical|literature_review|theoretical|case_study|policy_brief|conference|research_proposal|auto",
-  "structure_pattern": "IMRaD|thematic_review|theoretical_analysis|case_study|research_proposal|auto",
+  "paper_type": "{paper_type}",
+  "structure_pattern": "{structure_pattern}",
   "rationale": "Why this structure fits the topic and literature",
   "sections": [
     {{
