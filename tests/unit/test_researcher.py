@@ -161,6 +161,21 @@ async def test_openalex_retriever_null_abstract(respx_mock):
     assert papers[0].abstract == ""
 
 
+@pytest.mark.asyncio
+async def test_openalex_rate_limit_above_wait_budget_skips_without_sleep(respx_mock):
+    route = respx_mock.get(url__startswith="https://api.openalex.org").mock(
+        return_value=httpx.Response(429, headers={"retry-after": "38503"})
+    )
+    retriever = OpenAlexRetriever()
+
+    with patch("seele_scholar_agent.nodes.researcher.asyncio.sleep") as sleep_mock:
+        papers = await retriever.search("test")
+
+    assert papers == []
+    assert route.call_count == 1
+    sleep_mock.assert_not_called()
+
+
 def test_openalex_calculate_relevance_high_citation():
     retriever = OpenAlexRetriever()
     score = retriever._calculate_relevance({"cited_by_count": 5000, "publication_year": 2023})
@@ -193,6 +208,21 @@ async def test_semantic_scholar_retriever_http_403(respx_mock):
     retriever = SemanticScholarRetriever()
     papers = await retriever.search("test")
     assert papers == []
+
+
+@pytest.mark.asyncio
+async def test_semantic_scholar_rate_limit_above_wait_budget_skips_without_sleep(respx_mock):
+    route = respx_mock.get(url__startswith="https://api.semanticscholar.org").mock(
+        return_value=httpx.Response(429, headers={"retry-after": "38503"})
+    )
+    retriever = SemanticScholarRetriever()
+
+    with patch("seele_scholar_agent.nodes.researcher.asyncio.sleep") as sleep_mock:
+        papers = await retriever.search("test")
+
+    assert papers == []
+    assert route.call_count == 1
+    sleep_mock.assert_not_called()
 
 
 @pytest.mark.asyncio

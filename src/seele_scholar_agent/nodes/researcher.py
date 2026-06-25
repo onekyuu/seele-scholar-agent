@@ -32,10 +32,52 @@ logger = get_logger(__name__)
 
 # 保留在 state 中的 abstract 最大字符数（节省序列化体积）
 _PAPER_STATE_ABSTRACT_CHARS = settings.PAPER_STATE_ABSTRACT_CHARS
+_RETRIEVER_MAX_RETRY_AFTER_SECONDS = settings.RETRIEVER_MAX_RETRY_AFTER_SECONDS
 _DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 _ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
+
+
+def _parse_retry_after(value: str | None, *, default: float = 5.0) -> float:
+    if not value:
+        return default
+    try:
+        return max(float(value), 0.0)
+    except ValueError:
+        return default
+
+
+async def _wait_or_skip_rate_limit(
+    source: str,
+    retry_after_header: str | None,
+    *,
+    attempt: int,
+) -> bool:
+    retry_after = _parse_retry_after(retry_after_header)
+    attempt_number = attempt + 1
+    if retry_after > _RETRIEVER_MAX_RETRY_AFTER_SECONDS:
+        logger.warning(
+            f"{source} rate limited beyond wait budget, skipping source",
+            retry_after=retry_after,
+            max_retry_after=_RETRIEVER_MAX_RETRY_AFTER_SECONDS,
+            attempt=attempt_number,
+        )
+        return False
+    if attempt >= API_MAX_RETRIES - 1:
+        logger.warning(
+            f"{source} rate limited on final attempt, skipping source",
+            retry_after=retry_after,
+            attempt=attempt_number,
+        )
+        return False
+    logger.warning(
+        f"{source} rate limited, retrying",
+        retry_after=retry_after,
+        attempt=attempt_number,
+    )
+    await asyncio.sleep(retry_after)
+    return True
 
 
 def _normalize_doi(value: str | None) -> str | None:
@@ -242,14 +284,14 @@ class ArxivRetriever:
                     response = await client.get(search_url)
 
                     if response.status_code == 429:
-                        retry_after = int(response.headers.get("retry-after", 5))
-                        logger.warning(
-                            "ArXiv rate limited, retrying",
-                            retry_after=retry_after,
-                            attempt=attempt + 1,
+                        should_retry = await _wait_or_skip_rate_limit(
+                            "ArXiv",
+                            response.headers.get("retry-after"),
+                            attempt=attempt,
                         )
-                        await asyncio.sleep(retry_after)
-                        continue
+                        if should_retry:
+                            continue
+                        return []
 
                     if response.status_code != 200:
                         logger.error("ArXiv API error", status_code=response.status_code)
@@ -380,14 +422,14 @@ class OpenAlexRetriever:
                     response = await client.get(self.BASE_URL, params=params)
 
                     if response.status_code == 429:
-                        retry_after = int(response.headers.get("retry-after", 5))
-                        logger.warning(
-                            "OpenAlex rate limited, retrying",
-                            retry_after=retry_after,
-                            attempt=attempt + 1,
+                        should_retry = await _wait_or_skip_rate_limit(
+                            "OpenAlex",
+                            response.headers.get("retry-after"),
+                            attempt=attempt,
                         )
-                        await asyncio.sleep(retry_after)
-                        continue
+                        if should_retry:
+                            continue
+                        return []
 
                     if response.status_code != 200:
                         logger.error("OpenAlex API error", status_code=response.status_code)
@@ -481,14 +523,14 @@ class SemanticScholarRetriever:
                     response = await client.get(url, params=params, headers=self.headers)
 
                     if response.status_code == 429:
-                        retry_after = int(response.headers.get("retry-after", 5))
-                        logger.warning(
-                            "Semantic Scholar rate limited, retrying",
-                            retry_after=retry_after,
-                            attempt=attempt + 1,
+                        should_retry = await _wait_or_skip_rate_limit(
+                            "Semantic Scholar",
+                            response.headers.get("retry-after"),
+                            attempt=attempt,
                         )
-                        await asyncio.sleep(retry_after)
-                        continue
+                        if should_retry:
+                            continue
+                        return []
 
                     if response.status_code != 200:
                         logger.error("Semantic Scholar API error", status_code=response.status_code)
