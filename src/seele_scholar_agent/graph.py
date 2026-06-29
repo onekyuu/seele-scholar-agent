@@ -21,6 +21,7 @@ from .agent_config import (
     RAGRetrieverFunc,
 )
 from .budget import BudgetAllocatorNode, BudgetPolicy, BudgetRevisionNode, LengthGateNode
+from .citation import CitationSourceGateNode
 from .config import settings
 from .nodes.consistency_checker import ConsistencyCheckerNode
 from .nodes.finalizer import FinalizerNode
@@ -63,6 +64,7 @@ def create_writing_graph(
         openalex_email=openalex_email,
         extra_paper_retrievers=extra_paper_retrievers,
     )
+    citation_source_gate = CitationSourceGateNode()
     planner = PlannerNode(llm=model, prompts=prompts)
     outline_quality_gate = OutlineQualityGateNode()
     writer = WriterNode(
@@ -91,6 +93,7 @@ def create_writing_graph(
 
     graph.add_node("topic_proposer", topic_proposer.propose)
     graph.add_node("researcher", researcher.search)
+    graph.add_node("citation_source_gate", citation_source_gate.build)
     graph.add_node("planner", planner.plan)
     graph.add_node("outline_quality_gate", outline_quality_gate.check)
     graph.add_node("writer", writer.write)
@@ -110,7 +113,8 @@ def create_writing_graph(
     else:
         graph.add_edge(START, "topic_proposer")
         graph.add_edge("topic_proposer", "researcher")
-    graph.add_edge("researcher", "planner")
+    graph.add_edge("researcher", "citation_source_gate")
+    graph.add_edge("citation_source_gate", "planner")
     if graph_config.enable_outline_quality_gate:
         graph.add_edge("planner", "outline_quality_gate")
         graph.add_conditional_edges(

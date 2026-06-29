@@ -504,10 +504,9 @@ class WriterNode:
         )
 
         paper_summaries: list[str] = state.get("paper_summaries") or []
-        numbered_papers = (
-            self._build_numbered_papers_from_summaries(paper_summaries, state)
-            if paper_summaries
-            else self._build_numbered_papers(state.get("papers", []), state)
+        numbered_papers = self._build_citable_sources(
+            state,
+            paper_summaries=paper_summaries,
         )
 
         try:
@@ -639,9 +638,10 @@ class WriterNode:
             section,
             lang,
             (
-                self._build_numbered_papers_from_summaries(_paper_summaries, state)
-                if _paper_summaries
-                else self._build_numbered_papers(state.get("papers", []), state)
+                self._build_citable_sources(
+                    state,
+                    paper_summaries=_paper_summaries,
+                )
             ),
             rag_context,
         )
@@ -1136,6 +1136,73 @@ class WriterNode:
         registry = get_material_registry(state) if state is not None else None
         papers = state.get("papers", []) if state is not None else []
         return "\n".join(annotate_paper_summaries(paper_summaries, papers, registry))
+
+    def _build_citable_sources(
+        self,
+        state: AgentState,
+        *,
+        paper_summaries: list[str] | None = None,
+    ) -> str:
+        citation_sources = list(state.get("citation_sources", []) or [])
+        if citation_sources:
+            return self._build_numbered_citation_sources(citation_sources)
+        if paper_summaries:
+            return self._build_numbered_papers_from_summaries(paper_summaries, state)
+        return self._build_numbered_papers(state.get("papers", []), state)
+
+    def _build_numbered_citation_sources(self, citation_sources: list[Any]) -> str:
+        if not citation_sources:
+            return "无"
+        lines: list[str] = []
+        for source in citation_sources:
+            citation_id = getattr(source, "citation_id", None)
+            paper = getattr(source, "paper", None)
+            doi = getattr(source, "doi", None)
+            stable_url = getattr(source, "stable_url", None)
+            if isinstance(source, dict):
+                citation_id = source.get("citation_id")
+                paper = source.get("paper")
+                doi = source.get("doi")
+                stable_url = source.get("stable_url")
+            if paper is None:
+                continue
+            title = (
+                getattr(paper, "title", "")
+                if not isinstance(paper, dict)
+                else paper.get("title", "")
+            )
+            authors = (
+                getattr(paper, "authors", [])
+                if not isinstance(paper, dict)
+                else paper.get("authors", [])
+            )
+            year = (
+                getattr(paper, "year", None)
+                if not isinstance(paper, dict)
+                else paper.get("year")
+            )
+            venue = (
+                getattr(paper, "venue", None)
+                if not isinstance(paper, dict)
+                else paper.get("venue")
+            )
+            authors_str = ", ".join(authors[:3]) if authors else "Unknown"
+            if len(authors) > 3:
+                authors_str += " et al."
+            metadata = []
+            if year:
+                metadata.append(str(year))
+            if venue:
+                metadata.append(str(venue))
+            if doi:
+                metadata.append(f"DOI: {doi}")
+            elif stable_url:
+                metadata.append(str(stable_url))
+            suffix = f" — {authors_str}"
+            if metadata:
+                suffix += ". " + ". ".join(metadata)
+            lines.append(f"[{citation_id}] {title}{suffix}")
+        return "\n".join(lines) if lines else "无"
 
     async def _move_to_next(self, state: AgentState) -> dict[str, Any]:
         return self.execution_strategy.skip_completed_section_delta(state)

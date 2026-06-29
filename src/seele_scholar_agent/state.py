@@ -267,3 +267,5 @@ class AgentState(TypedDict):
     budget_revision_rounds: NotRequired[dict[str, int]]
     writer_input: NotRequired[Any]
     citation_sources: NotRequired[list[Any]]
+    retrieval_diagnostics: NotRequired[list[Any]]
+    citation_source_diagnostics: NotRequired[dict[str, Any]]

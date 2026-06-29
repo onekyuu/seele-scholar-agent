@@ -1,5 +1,6 @@
 from .agent_config import BudgetAllocatorFunc, GraphConfig, PaperSearchFunc, RAGRetrieverFunc
 from .budget import BudgetAllocatorNode, BudgetPolicy, BudgetState, SectionBudget
+from .citation import CitationSource, CitationSourceGateNode, RetrievalDiagnostic, SourceQuality
 from .evals import QualityMetrics, evaluate_quality
 from .graph import create_simple_writing_graph, create_writing_graph
 from .logging import setup_logging
@@ -57,6 +58,10 @@ __all__ = [
     "BudgetAllocatorNode",
     "BudgetState",
     "SectionBudget",
+    "CitationSource",
+    "CitationSourceGateNode",
+    "RetrievalDiagnostic",
+    "SourceQuality",
     "OutlineContext",
     "SectionBrief",
     "SectionWritingSpec",
