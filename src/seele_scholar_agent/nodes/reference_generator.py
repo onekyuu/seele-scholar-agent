@@ -3,6 +3,7 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
+from ..citation import CitationSource
 from ..document_profile import is_research_proposal
 from ..logging import get_logger
 from ..state import AgentState, PaperMetadata, QualityIssue, ReferenceEntry
@@ -68,9 +69,10 @@ async def _enrich_from_crossref(
 class ReferenceGeneratorNode:
     async def generate(self, state: AgentState) -> dict[str, Any]:
         papers = state.get("papers", [])
+        citation_sources = _citation_sources_from_state(state)
         sections = state.get("sections", [])
 
-        if not papers:
+        if not papers and not citation_sources:
             logger.warning("no papers available for reference generation")
             return {"references": [], "status": "completed"}
 
@@ -110,13 +112,11 @@ class ReferenceGeneratorNode:
                 "status": "completed",
             }
 
-        target_papers: list[tuple[int, PaperMetadata]] = []
-        for num in sorted(cited_numbers):
-            idx = num - 1
-            if idx < 0 or idx >= len(papers):
-                logger.warning("citation number out of range", number=num, total=len(papers))
-                continue
-            target_papers.append((num, papers[idx]))
+        target_sources = _target_citation_sources(cited_numbers, citation_sources)
+        if citation_sources:
+            return await self._generate_from_citation_sources(target_sources)
+
+        target_papers = _target_papers(cited_numbers, papers)
 
         semaphore = asyncio.Semaphore(_CROSSREF_CONCURRENCY)
         crossref_results = await asyncio.gather(
@@ -160,7 +160,103 @@ class ReferenceGeneratorNode:
         logger.info("references generated", count=len(entries))
         return {"references": entries, "status": "completed"}
 
+    async def _generate_from_citation_sources(
+        self, target_sources: list[tuple[int, CitationSource]]
+    ) -> dict[str, Any]:
+        semaphore = asyncio.Semaphore(_CROSSREF_CONCURRENCY)
+        crossref_results = await asyncio.gather(
+            *[_enrich_from_crossref(source.paper, semaphore) for _, source in target_sources]
+        )
+
+        entries: list[ReferenceEntry] = []
+        for (num, source), cr in zip(target_sources, crossref_results, strict=True):
+            paper = source.paper
+            verification_source: Literal["crossref", "openalex", "local", "none"]
+            if cr is not None:
+                year = cr.year
+                venue = cr.venue
+                authors = cr.authors if cr.authors else paper.authors
+                doi = cr.doi or source.doi
+                metadata_verified = True
+                verification_source = "crossref"
+            else:
+                year = paper.year or _extract_year_from_paper(paper)
+                venue = paper.venue
+                authors = paper.authors
+                doi = source.doi or paper.doi
+                metadata_verified = source.source_quality.metadata_verified
+                verification_source = _reference_verification_source(source)
+
+            entry = ReferenceEntry(
+                number=num,
+                paper_id=paper.paper_id,
+                title=paper.title,
+                authors=authors,
+                year=year,
+                venue=venue,
+                url=source.stable_url or paper.url,
+                doi=doi,
+                metadata_verified=metadata_verified,
+                verification_source=verification_source,
+                formatted="",
+            )
+            entry = entry.model_copy(update={"formatted": _format_reference(entry)})
+            entries.append(entry)
+
+        logger.info("references generated from citation sources", count=len(entries))
+        return {"references": entries, "status": "completed"}
+
     async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
         yield NodeStreamEvent(type="progress", progress="generating_references")
         result = await self.generate(state)
         yield NodeStreamEvent(type="result", result=result)
+
+
+def _citation_sources_from_state(state: AgentState) -> list[CitationSource]:
+    sources: list[CitationSource] = []
+    for item in state.get("citation_sources", []) or []:
+        if isinstance(item, CitationSource):
+            sources.append(item)
+        elif isinstance(item, dict):
+            sources.append(CitationSource(**item))
+    return sources
+
+
+def _target_citation_sources(
+    cited_numbers: set[int], citation_sources: list[CitationSource]
+) -> list[tuple[int, CitationSource]]:
+    if not citation_sources:
+        return []
+    by_id = {source.citation_id: source for source in citation_sources}
+    target_sources: list[tuple[int, CitationSource]] = []
+    for num in sorted(cited_numbers):
+        source = by_id.get(num)
+        if source is None:
+            logger.warning("citation source id out of range", number=num, total=len(by_id))
+            continue
+        target_sources.append((num, source))
+    return target_sources
+
+
+def _target_papers(
+    cited_numbers: set[int], papers: list[PaperMetadata]
+) -> list[tuple[int, PaperMetadata]]:
+    target_papers: list[tuple[int, PaperMetadata]] = []
+    for num in sorted(cited_numbers):
+        idx = num - 1
+        if idx < 0 or idx >= len(papers):
+            logger.warning("citation number out of range", number=num, total=len(papers))
+            continue
+        target_papers.append((num, papers[idx]))
+    return target_papers
+
+
+def _reference_verification_source(
+    source: CitationSource,
+) -> Literal["openalex", "local", "none"]:
+    verification_source = source.source_quality.verification_source
+    if verification_source == "openalex":
+        return "openalex"
+    if verification_source in {"arxiv", "semantic_scholar", "local"}:
+        return "local"
+    return "none"

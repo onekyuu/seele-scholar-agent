@@ -2,6 +2,7 @@ from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from seele_scholar_agent.citation import CitationSource, SourceQuality
 from seele_scholar_agent.nodes.reference_generator import ReferenceGeneratorNode
 from seele_scholar_agent.state import AgentState, PaperMetadata, SectionDraft
 from seele_scholar_agent.tools.crossref import CrossRefMetadata, extract_doi_from_url
@@ -41,6 +42,46 @@ async def test_reference_generator_cited_papers_returned(base_state, sample_pape
     numbers = {r.number for r in refs}
     assert numbers == {1, 2}
     assert result["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_reference_generator_uses_citation_source_ids(base_state, sample_papers):
+    source = CitationSource(
+        citation_id=7,
+        paper=sample_papers[0],
+        stable_url="https://doi.org/10.48550/arxiv.1706.03762",
+        doi="10.48550/arxiv.1706.03762",
+        source_quality=SourceQuality(
+            citable=True,
+            metadata_verified=True,
+            verification_source="openalex",
+        ),
+    )
+    sections = [_make_section("See [7] for details.")]
+    state = cast(
+        AgentState,
+        {
+            **base_state,
+            "papers": [],
+            "citation_sources": [source],
+            "sections": sections,
+        },
+    )
+
+    with patch(
+        "seele_scholar_agent.nodes.reference_generator.fetch_metadata",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        node = ReferenceGeneratorNode()
+        result = await node.generate(state)
+
+    refs = result["references"]
+    assert len(refs) == 1
+    assert refs[0].number == 7
+    assert refs[0].paper_id == sample_papers[0].paper_id
+    assert refs[0].doi == "10.48550/arxiv.1706.03762"
+    assert refs[0].metadata_verified is True
 
 
 # ---------------------------------------------------------------------------

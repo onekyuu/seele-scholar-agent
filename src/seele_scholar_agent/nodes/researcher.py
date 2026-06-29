@@ -503,7 +503,7 @@ class SemanticScholarRetriever:
                 "authors",
                 "abstract",
                 "url",
-                "pdfUrl",
+                "openAccessPdf",
                 "year",
                 "venue",
                 "citationCount",
@@ -543,6 +543,7 @@ class SemanticScholarRetriever:
                     relevance = self._calculate_relevance(r)
                     external_ids = r.get("externalIds") or {}
                     doi = _normalize_doi(external_ids.get("DOI")) or _normalize_doi(r.get("url"))
+                    open_access_pdf = r.get("openAccessPdf") or {}
                     papers.append(
                         PaperMetadata(
                             paper_id=r["paperId"],
@@ -550,7 +551,7 @@ class SemanticScholarRetriever:
                             authors=[a.get("name", "") for a in r.get("authors", [])],
                             abstract=r.get("abstract", ""),
                             url=r.get("url", ""),
-                            pdf_url=r.get("pdfUrl", ""),
+                            pdf_url=open_access_pdf.get("url") or r.get("pdfUrl", ""),
                             source="semantic_scholar",
                             relevance_score=relevance,
                             doi=doi,

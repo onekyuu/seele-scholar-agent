@@ -198,6 +198,7 @@ async def test_semantic_scholar_retriever_normal(respx_mock):
     assert len(papers) == 2
     assert all(p.source == "semantic_scholar" for p in papers)
     assert papers[0].paper_id == "s2:paper001"
+    assert papers[0].pdf_url == "https://pdf.semanticscholar.org/001.pdf"
 
 
 @pytest.mark.asyncio
