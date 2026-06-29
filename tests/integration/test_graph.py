@@ -8,7 +8,15 @@ import pytest
 import respx
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
+from seele_scholar_agent import (
+    BudgetPolicy,
+    BudgetState,
+    GenerationMode,
+    GraphConfig,
+    SectionBudget,
+)
 from seele_scholar_agent.graph import create_simple_writing_graph
+from seele_scholar_agent.state import OutlineStructure, SectionDraft, SectionOutline
 
 
 def _topic_proposer_response() -> str:
@@ -171,12 +179,12 @@ async def test_graph_reviewer_rejection_triggers_retry(base_state, mock_prompts)
 
 
 # ---------------------------------------------------------------------------
-# G-04: Graph stops for human review when max_revisions reached
+# G-04: Graph accepts best candidate with report when max_revisions reached
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_graph_max_revisions_blocks_completion(base_state, mock_prompts):
+async def test_graph_max_revisions_accepts_best_with_report(base_state, mock_prompts):
     with respx.mock(assert_all_mocked=False, assert_all_called=False) as respx_mock:
         _mock_http(respx_mock)
 
@@ -205,9 +213,10 @@ async def test_graph_max_revisions_blocks_completion(base_state, mock_prompts):
 
         result = await graph.ainvoke(state, config={"configurable": {"thread_id": "g-test-004"}})
 
-    assert result["status"] == "waiting_human"
-    assert result["sections"][0].status == "review"
+    assert result["status"] == "completed"
+    assert result["sections"][0].status == "accepted_with_issues"
     assert any(issue.code == "MAX_REVISIONS_REACHED" for issue in result["quality_issues"])
+    assert result["quality_report"].document_status == "completed_with_issues"
 
 
 # ---------------------------------------------------------------------------
@@ -248,8 +257,124 @@ async def test_graph_multiple_sections_all_completed(base_state, mock_prompts):
 
     assert result["status"] == "completed"
     completed = result["sections_completed"]
-    assert "Introduction" in completed
-    assert "Conclusion" in completed
+    assert completed == ["Introduction", "Conclusion"]
+    assert len(completed) == len(set(completed))
+
+
+@pytest.mark.asyncio
+async def test_graph_single_section_mode_stops_after_current_section(base_state, mock_prompts):
+    outline = OutlineStructure(
+        title="Existing Outline",
+        abstract="Abstract.",
+        sections=[
+            SectionOutline(
+                title="Introduction",
+                description="Intro",
+                order=1,
+                purpose="Open the paper.",
+                content_summary="Introduce the topic.",
+                target_claims=["Claim."],
+                key_sources=["[1] Source"],
+                citation_plan=["Use [1]."],
+            ),
+            SectionOutline(
+                title="Conclusion",
+                description="Close",
+                order=2,
+                purpose="Close the paper.",
+                content_summary="Summarize the topic.",
+                target_claims=["Conclusion claim."],
+                key_sources=["[1] Source"],
+                citation_plan=["Use [1]."],
+            ),
+        ],
+    )
+    sections = [
+        SectionDraft(
+            section_id="section_0",
+            title="Introduction",
+            description="Intro",
+            order_index=0,
+        ),
+        SectionDraft(
+            section_id="section_1",
+            title="Conclusion",
+            description="Close",
+            order_index=1,
+        ),
+    ]
+
+    llm = _make_mock_llm(
+        [
+            AIMessage(content="Claim for Introduction content."),
+            AIMessage(content=_reviewer_response(approved=True)),
+        ]
+    )
+    graph = create_simple_writing_graph(
+        model=llm,
+        prompts=mock_prompts,
+        graph_config=GraphConfig(generation_mode=GenerationMode.SINGLE_SECTION),
+    )
+    state = {
+        **base_state,
+        "outline": outline,
+        "outline_approved": True,
+        "sections": sections,
+        "current_section_index": 0,
+        "status": "writing",
+    }
+
+    result = await graph.ainvoke(state, config={"configurable": {"thread_id": "g-test-006a"}})
+
+    assert result["status"] == "section_done"
+    assert result["sections"][0].status == "approved"
+    assert result["sections"][1].status == "pending"
+    assert result["sections_completed"] == ["Introduction"]
+    assert llm.ainvoke.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_graph_budget_revision_runs_before_review(base_state, mock_prompts):
+    with respx.mock(assert_all_mocked=False, assert_all_called=False) as respx_mock:
+        _mock_http(respx_mock)
+
+        llm = _make_mock_llm(
+            [
+                AIMessage(content=_topic_proposer_response()),
+                AIMessage(content=_planner_response()),
+                AIMessage(content="one two three four five"),
+                AIMessage(content="one two"),
+                AIMessage(content=_reviewer_response(approved=True)),
+            ]
+        )
+
+        graph = create_simple_writing_graph(
+            model=llm,
+            prompts=mock_prompts,
+            budget_policy=BudgetPolicy(max_budget_revision_rounds=1),
+        )
+        state = {
+            **base_state,
+            "outline_approved": True,
+            "budget_state": BudgetState(
+                total_target=3,
+                sections={
+                    "section_0": SectionBudget(
+                        section_id="section_0",
+                        target=3,
+                        hard_limit=3,
+                        unit="words",
+                    )
+                },
+            ),
+        }
+
+        result = await graph.ainvoke(state, config={"configurable": {"thread_id": "g-test-006b"}})
+
+    assert result["status"] == "completed"
+    assert result["sections"][0].content == "one two"
+    assert result["budget_revision_rounds"]["section_0"] == 1
+    assert result["budget_state"].section_actuals["section_0"] == 2
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
-from .agent_config import PaperSearchFunc, RAGRetrieverFunc
+from .agent_config import BudgetAllocatorFunc, GraphConfig, PaperSearchFunc, RAGRetrieverFunc
+from .budget import BudgetAllocatorNode, BudgetPolicy, BudgetState, SectionBudget
 from .evals import QualityMetrics, evaluate_quality
 from .graph import create_simple_writing_graph, create_writing_graph
 from .logging import setup_logging
@@ -13,6 +14,7 @@ from .nodes.researcher import ResearcherNode
 from .nodes.reviewer import ReviewerNode
 from .nodes.topic_proposer import TopicProposerNode
 from .nodes.writer import WriterNode
+from .policy import GenerationMode, QualityReport, SectionExecutionPolicy, WritingPolicy
 from .state import (
     AgentState,
     ClaimEvidenceBinding,
@@ -26,6 +28,7 @@ from .state import (
     SectionStyleGuidance,
 )
 from .style_packs import LocaleStylePack, StyleReference
+from .writing import OutlineContext, SectionBrief, SectionWritingSpec, WriterInput
 
 __version__ = "0.12.5"
 
@@ -44,6 +47,20 @@ __all__ = [
     "ReferenceGeneratorNode",
     "IntegrityGateNode",
     "OutlineQualityGateNode",
+    "GraphConfig",
+    "GenerationMode",
+    "SectionExecutionPolicy",
+    "WritingPolicy",
+    "QualityReport",
+    "BudgetPolicy",
+    "BudgetAllocatorFunc",
+    "BudgetAllocatorNode",
+    "BudgetState",
+    "SectionBudget",
+    "OutlineContext",
+    "SectionBrief",
+    "SectionWritingSpec",
+    "WriterInput",
     "AgentState",
     "PaperMetadata",
     "QualityIssue",

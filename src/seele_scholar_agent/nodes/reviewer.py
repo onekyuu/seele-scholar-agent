@@ -2,7 +2,7 @@ import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -20,6 +20,13 @@ from ..document_profile import (
 )
 from ..i18n import t
 from ..logging import get_logger
+from ..policy import SectionExecutionStrategy, WritingPolicy
+from ..review import (
+    ReviewDecision,
+    SectionCandidate,
+    decide_review_action,
+    select_best_candidate,
+)
 from ..state import (
     AgentState,
     ClaimEvidenceBinding,
@@ -57,9 +64,17 @@ def _build_numbered_papers_summary(papers: list[PaperMetadata]) -> str:
 
 
 class ReviewerNode:
-    def __init__(self, llm: ChatOpenAI, prompts: PromptsConfig):
+    def __init__(
+        self,
+        llm: ChatOpenAI,
+        prompts: PromptsConfig,
+        execution_strategy: SectionExecutionStrategy | None = None,
+        writing_policy: WritingPolicy | None = None,
+    ):
         self.llm = llm
         self.prompts = prompts
+        self.execution_strategy = execution_strategy or SectionExecutionStrategy()
+        self.writing_policy = writing_policy or WritingPolicy()
         self.prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", self.prompts.reviewer_system_prompt),
@@ -210,11 +225,26 @@ class ReviewerNode:
             "approved": review.approved,
             "timestamp": datetime.now(UTC).isoformat(),
         }
+        candidate = self._section_candidate(section, review, quality_issues)
+        decision = decide_review_action(
+            review,
+            quality_issues,
+            revision_count=section.revision_count,
+            max_revisions=self._max_revisions(state),
+            writing_policy=self.writing_policy,
+            generation_mode=self.execution_strategy.policy.generation_mode,
+        )
 
-        if review.approved:
-            result = await self._handle_approved(state, section, review, record)
+        if decision.action == "pass":
+            result = await self._handle_approved(state, review, record, candidate, decision)
+        elif decision.action == "accept_best":
+            result = await self._handle_accept_best(
+                state, section, review, record, quality_issues, candidate, decision
+            )
         else:
-            result = await self._handle_rejected(state, section, review, record, quality_issues)
+            result = await self._handle_rejected(
+                state, section, review, record, quality_issues, candidate, decision
+            )
         if quality_issues and "quality_issues" not in result:
             result["quality_issues"] = quality_issues
         result["review_diagnostics"] = self._build_review_diagnostics(
@@ -358,12 +388,27 @@ class ReviewerNode:
             "approved": review.approved,
             "timestamp": datetime.now(UTC).isoformat(),
         }
+        candidate = self._section_candidate(section, review, quality_issues)
+        decision = decide_review_action(
+            review,
+            quality_issues,
+            revision_count=section.revision_count,
+            max_revisions=self._max_revisions(state),
+            writing_policy=self.writing_policy,
+            generation_mode=self.execution_strategy.policy.generation_mode,
+        )
 
-        if review.approved:
-            final_result = await self._handle_approved(state, section, review, record)
+        if decision.action == "pass":
+            final_result = await self._handle_approved(
+                state, review, record, candidate, decision
+            )
+        elif decision.action == "accept_best":
+            final_result = await self._handle_accept_best(
+                state, section, review, record, quality_issues, candidate, decision
+            )
         else:
             final_result = await self._handle_rejected(
-                state, section, review, record, quality_issues
+                state, section, review, record, quality_issues, candidate, decision
             )
         if quality_issues and "quality_issues" not in final_result:
             final_result["quality_issues"] = quality_issues
@@ -1157,32 +1202,59 @@ class ReviewerNode:
         return "structural_issues"
 
     async def _handle_approved(
-        self, state: AgentState, section: Any, review: ReviewResult, record: dict[str, Any]
+        self,
+        state: AgentState,
+        review: ReviewResult,
+        record: dict[str, Any],
+        candidate: SectionCandidate,
+        decision: ReviewDecision,
     ) -> dict[str, Any]:
-        sections = state["sections"]
+        return {
+            **self.execution_strategy.approved_section_delta(
+                state, section_status="approved"
+            ),
+            "review_history": [record],
+            "section_candidates": [candidate],
+            "current_review": review.model_dump(),
+            "review_decision": decision.model_dump(),
+        }
+
+    async def _handle_accept_best(
+        self,
+        state: AgentState,
+        section: Any,
+        review: ReviewResult,
+        record: dict[str, Any],
+        quality_issues: list[QualityIssue],
+        candidate: SectionCandidate,
+        decision: ReviewDecision,
+    ) -> dict[str, Any]:
+        candidates = self._section_candidates_for_section(state, section.section_id)
+        candidates.append(candidate)
+        best = select_best_candidate(candidates)
+
+        sections = list(state["sections"])
         index = state["current_section_index"]
-        updated = sections.copy()
-        updated[index] = section.model_copy(update={"status": "approved"})
-
-        completed = state.get("sections_completed", [])
-        completed.append(section.title)
-
-        if index + 1 >= len(sections):
-            return {
-                "sections": updated,
-                "sections_completed": completed,
-                "review_history": [record],
-                "current_review": review.model_dump(),
-                "status": "completed",
-            }
+        sections[index] = section.model_copy(update={"content": best.content})
+        state_for_strategy = {**state, "sections": sections}
+        quality_issue = self._max_revisions_quality_issue(
+            section,
+            review,
+            max_revisions=self._max_revisions(state),
+            severity="warning",
+            blocking=False,
+            accepted_with_issues=True,
+        )
 
         return {
-            "sections": updated,
-            "sections_completed": completed,
-            "current_section_index": index + 1,
+            **self.execution_strategy.approved_section_delta(
+                state_for_strategy, section_status="accepted_with_issues"
+            ),
             "review_history": [record],
+            "section_candidates": [candidate],
             "current_review": review.model_dump(),
-            "status": "writing",
+            "review_decision": decision.model_dump(),
+            "quality_issues": [quality_issue, *quality_issues],
         }
 
     async def _handle_rejected(
@@ -1192,15 +1264,17 @@ class ReviewerNode:
         review: ReviewResult,
         record: dict[str, Any],
         quality_issues: list[QualityIssue] | None = None,
+        candidate: SectionCandidate | None = None,
+        decision: ReviewDecision | None = None,
     ) -> dict[str, Any]:
         sections = state["sections"]
         index = state["current_section_index"]
         total_revision_count = state.get("revision_count", 0)
         section_revision_count = section.revision_count
-        max_revisions = state.get("max_revisions", settings.MAX_REVISIONS)
+        max_revisions = self._max_revisions(state)
         lang = state.get("language", "zh")
 
-        if section_revision_count >= max_revisions:
+        if decision is not None and decision.action == "human_required":
             logger.warning(
                 "max revisions reached, blocking section instead of forcing approval",
                 section=section.title,
@@ -1208,7 +1282,6 @@ class ReviewerNode:
                 max_revisions=max_revisions,
             )
             updated = sections.copy()
-            issue_summaries = [issue.description for issue in review.issues if issue.description]
             comments = [
                 t(lang, "review_round", round=section_revision_count, score=review.score),
                 t(lang, "review_opinion", summary=review.summary),
@@ -1222,29 +1295,21 @@ class ReviewerNode:
                 update={"status": "review", "review_comments": comments}
             )
 
-            quality_issue = QualityIssue(
-                code="MAX_REVISIONS_REACHED",
-                message=(
-                    f"Section '{section.title}' failed review after "
-                    f"{section_revision_count} revision(s)."
-                ),
+            quality_issue = self._max_revisions_quality_issue(
+                section,
+                review,
+                max_revisions=max_revisions,
                 severity="blocking",
-                location=section.section_id,
                 blocking=True,
-                details={
-                    "section_title": section.title,
-                    "revision_count": section_revision_count,
-                    "max_revisions": max_revisions,
-                    "review_score": review.score,
-                    "review_summary": review.summary,
-                    "review_issues": issue_summaries,
-                },
+                accepted_with_issues=False,
             )
 
             result: dict[str, Any] = {
                 "sections": updated,
                 "review_history": [record],
+                "section_candidates": [candidate] if candidate is not None else [],
                 "current_review": review.model_dump(),
+                "review_decision": decision.model_dump(),
                 "quality_issues": [quality_issue, *(quality_issues or [])],
                 "status": "waiting_human",
                 "error_message": quality_issue.message,
@@ -1274,10 +1339,79 @@ class ReviewerNode:
         result = {
             "sections": updated,
             "review_history": [record],
+            "section_candidates": [candidate] if candidate is not None else [],
             "current_review": review.model_dump(),
+            "review_decision": decision.model_dump() if decision is not None else None,
             "revision_count": total_revision_count + 1,
             "status": "writing",
         }
         if quality_issues:
             result["quality_issues"] = quality_issues
         return result
+
+    def _max_revisions(self, state: AgentState) -> int:
+        return int(state.get("max_revisions", self.writing_policy.max_revisions))
+
+    def _section_candidate(
+        self,
+        section: Any,
+        review: ReviewResult,
+        quality_issues: list[QualityIssue],
+    ) -> SectionCandidate:
+        blocking_issues = [
+            issue for issue in quality_issues if issue.blocking or issue.severity == "blocking"
+        ]
+        warnings = [issue for issue in quality_issues if issue not in blocking_issues]
+        return SectionCandidate(
+            section_id=section.section_id,
+            content=section.content,
+            revision_count=section.revision_count,
+            review_score=review.score,
+            blocking_issues=blocking_issues,
+            warnings=warnings,
+            length=len(section.content),
+            diagnostics={"review_summary": review.summary},
+        )
+
+    def _section_candidates_for_section(
+        self, state: AgentState, section_id: str
+    ) -> list[SectionCandidate]:
+        candidates: list[SectionCandidate] = []
+        for item in state.get("section_candidates", []):
+            candidate = item if isinstance(item, SectionCandidate) else SectionCandidate(**item)
+            if candidate.section_id == section_id:
+                candidates.append(candidate)
+        return candidates
+
+    def _max_revisions_quality_issue(
+        self,
+        section: Any,
+        review: ReviewResult,
+        *,
+        max_revisions: int,
+        severity: Literal["warning", "blocking"],
+        blocking: bool,
+        accepted_with_issues: bool,
+    ) -> QualityIssue:
+        issue_summaries = [issue.description for issue in review.issues if issue.description]
+        section_revision_count = section.revision_count
+        return QualityIssue(
+            code="MAX_REVISIONS_REACHED",
+            message=(
+                f"Section '{section.title}' failed review after "
+                f"{section_revision_count} revision(s)."
+            ),
+            severity=severity,
+            location=section.section_id,
+            blocking=blocking,
+            details={
+                "section_title": section.title,
+                "revision_count": section_revision_count,
+                "max_revisions": max_revisions,
+                "review_score": review.score,
+                "review_summary": review.summary,
+                "review_issues": issue_summaries,
+                "accepted_with_issues": accepted_with_issues,
+                "recommended_action": f"Review and revise section '{section.title}'.",
+            },
+        )

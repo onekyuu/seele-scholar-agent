@@ -28,10 +28,13 @@ def make_base_state(topic: str = "Large Language Models", language: str = "zh") 
         current_section_index=0,
         sections_completed=[],
         review_history=[],
+        section_candidates=[],
         current_review=None,
         rag_context=[],
         evidence_packets=[],
         claim_evidence_bindings=[],
+        section_summaries=[],
+        paper_summaries=[],
         status="idle",
         error_message=None,
         max_revisions=3,
@@ -40,6 +43,7 @@ def make_base_state(topic: str = "Large Language Models", language: str = "zh") 
         consistency_issues=[],
         consistency_checked=False,
         quality_issues=[],
+        quality_issue_history=[],
     )
 
 

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from seele_scholar_agent.nodes.reviewer import ReviewerNode
+from seele_scholar_agent.policy import WritingPolicy
 from seele_scholar_agent.state import (
     AgentState,
     ClaimEvidenceBinding,
@@ -128,12 +129,14 @@ async def test_reviewer_rejected_appends_comments_and_increments_revision(
 
 
 # ---------------------------------------------------------------------------
-# RV-04: revision_count >= max_revisions, rejected → blocking issue, waiting_human
+# RV-04: revision_count >= max_revisions, rejected → accept best with report
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_reviewer_max_revisions_blocks_approval(mock_llm, mock_prompts, base_state):
+async def test_reviewer_max_revisions_accepts_best_with_report(
+    mock_llm, mock_prompts, base_state
+):
     sections = [_written_section("Introduction", index=0, revision_count=3)]
     state = _make_state_with_written_section(base_state, sections, index=0, max_revisions=3)
 
@@ -151,19 +154,21 @@ async def test_reviewer_max_revisions_blocks_approval(mock_llm, mock_prompts, ba
         node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
         result = await node.review(state)
 
-    assert result["status"] == "waiting_human"
-    assert result["sections"][0].status == "review"
+    assert result["status"] == "completed"
+    assert result["sections"][0].status == "accepted_with_issues"
     assert result["quality_issues"][0].code == "MAX_REVISIONS_REACHED"
-    assert result["quality_issues"][0].blocking is True
+    assert result["quality_issues"][0].blocking is False
+    assert result["quality_issues"][0].details["accepted_with_issues"] is True
+    assert result["review_decision"]["action"] == "accept_best"
 
 
 # ---------------------------------------------------------------------------
-# RV-04b: revision_count >= max_revisions, rejected, NOT last section → blocks current section
+# RV-04b: revision_count >= max_revisions, rejected, NOT last section → continues next section
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_reviewer_max_revisions_blocks_not_last_section(
+async def test_reviewer_max_revisions_accepts_best_not_last_section(
     mock_llm, mock_prompts, base_state
 ):
     sections = [
@@ -186,11 +191,42 @@ async def test_reviewer_max_revisions_blocks_not_last_section(
         node = ReviewerNode(llm=mock_llm, prompts=mock_prompts)
         result = await node.review(state)
 
+    assert result["status"] == "writing"
+    assert result["sections"][0].status == "accepted_with_issues"
+    assert result["current_section_index"] == 1
+    assert result["sections_completed"] == ["Introduction"]
+    assert result["quality_issues"][0].code == "MAX_REVISIONS_REACHED"
+
+
+@pytest.mark.asyncio
+async def test_reviewer_max_revisions_can_block_with_policy(
+    mock_llm, mock_prompts, base_state
+):
+    sections = [_written_section("Introduction", index=0, revision_count=1)]
+    state = _make_state_with_written_section(base_state, sections, index=0, max_revisions=1)
+
+    review_result = {
+        "approved": False,
+        "score": 3,
+        "issues": [{"type": "other", "description": "Bad.", "suggestion": "Redo."}],
+        "summary": "Poor quality.",
+    }
+    with patch(
+        "seele_scholar_agent.nodes.reviewer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=review_result,
+    ):
+        node = ReviewerNode(
+            llm=mock_llm,
+            prompts=mock_prompts,
+            writing_policy=WritingPolicy(on_max_revisions="block"),
+        )
+        result = await node.review(state)
+
     assert result["status"] == "waiting_human"
     assert result["sections"][0].status == "review"
-    assert "current_section_index" not in result
-    assert "sections_completed" not in result
-    assert result["quality_issues"][0].code == "MAX_REVISIONS_REACHED"
+    assert result["quality_issues"][0].blocking is True
+    assert result["review_decision"]["action"] == "human_required"
 
 
 # ---------------------------------------------------------------------------

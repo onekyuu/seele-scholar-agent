@@ -116,7 +116,14 @@ class SectionDraft(BaseModel):
     description: str = ""
     content: str = ""
     order_index: int
-    status: Literal["pending", "writing", "review", "approved", "auto_generated"] = "pending"
+    status: Literal[
+        "pending",
+        "writing",
+        "review",
+        "approved",
+        "accepted_with_issues",
+        "auto_generated",
+    ] = "pending"
     revision_count: int = 0
     review_comments: list[str] = Field(default_factory=list)
 
@@ -215,12 +222,13 @@ class AgentState(TypedDict):
     outline_approved: bool
     sections: list[SectionDraft]
     current_section_index: int
-    sections_completed: Annotated[list[str], operator.add]
+    sections_completed: list[str]
     review_history: Annotated[list[dict[str, Any]], operator.add]
+    section_candidates: Annotated[list[Any], operator.add]
     current_review: ReviewResult | None
     rag_context: Annotated[list[DocumentChunk], operator.add]
     evidence_packets: Annotated[list[EvidencePacket], operator.add]
-    claim_evidence_bindings: Annotated[list[ClaimEvidenceBinding], operator.add]
+    claim_evidence_bindings: list[ClaimEvidenceBinding]
 
     # Writer 写完每章后生成的摘要，按章节索引定位（positional list，非累加）
     # section_summaries[i] 对应 sections[i] 的内容摘要，约 150-200 tokens per item
@@ -239,6 +247,7 @@ class AgentState(TypedDict):
         "finalizing",
         "checking_consistency",
         "waiting_human",
+        "section_done",
         "completed",
         "failed",
     ]
@@ -249,4 +258,12 @@ class AgentState(TypedDict):
     references: list[ReferenceEntry]
     consistency_issues: list[ConsistencyIssue]
     consistency_checked: bool
-    quality_issues: Annotated[list[QualityIssue], operator.add]
+    quality_issues: list[QualityIssue]
+    quality_issue_history: Annotated[list[QualityIssue], operator.add]
+    review_decision: NotRequired[Any]
+    quality_report: NotRequired[Any]
+    budget_state: NotRequired[Any]
+    budget_diagnostics: NotRequired[dict[str, Any]]
+    budget_revision_rounds: NotRequired[dict[str, int]]
+    writer_input: NotRequired[Any]
+    citation_sources: NotRequired[list[Any]]

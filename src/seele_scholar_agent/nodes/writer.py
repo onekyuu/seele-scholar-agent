@@ -16,6 +16,7 @@ from ..document_profile import (
 )
 from ..i18n import t
 from ..logging import get_logger
+from ..policy import SectionExecutionStrategy
 from ..state import (
     AgentState,
     ClaimEvidenceBinding,
@@ -26,6 +27,7 @@ from ..state import (
     SectionOutline,
 )
 from ..style_packs import build_writer_style_context
+from ..writing import SectionWritingSpec, WriterInput, WriterInputBuilder
 from . import (
     CITATION_PATTERN,
     PREVIOUS_SECTION_MAX_CHARS,
@@ -419,7 +421,11 @@ class CitationBinder:
 
 class WriterNode:
     def __init__(
-        self, llm: ChatOpenAI, prompts: PromptsConfig, rag_retriever: RAGRetrieverFunc | None = None
+        self,
+        llm: ChatOpenAI,
+        prompts: PromptsConfig,
+        rag_retriever: RAGRetrieverFunc | None = None,
+        execution_strategy: SectionExecutionStrategy | None = None,
     ):
         self.llm = llm
         self.prompts = prompts
@@ -455,6 +461,8 @@ class WriterNode:
         self.academic_revision_writer = DraftWriter(self.academic_revision_chain)
         self.citation_binder = CitationBinder()
         self.style_polisher = StylePolisher()
+        self.execution_strategy = execution_strategy or SectionExecutionStrategy()
+        self.writer_input_builder = WriterInputBuilder()
 
     async def write(self, state: AgentState) -> dict[str, Any]:
         sections = state["sections"]
@@ -464,7 +472,11 @@ class WriterNode:
         if current_index >= len(sections):
             return {
                 "status": "completed",
-                "sections_completed": state.get("sections_completed", []),
+                "sections_completed": [
+                    s.title
+                    for s in sections
+                    if s.status in {"approved", "accepted_with_issues"}
+                ],
             }
 
         section = sections[current_index]
@@ -482,14 +494,13 @@ class WriterNode:
         )
         rag_context = self._build_rag_context(evidence_packets)
 
-        outline_json = self._build_outline_json(state.get("outline"))
         section_outline = self._find_section_outline(state, section)
         style_guidance = build_writer_style_context(state, section_outline)
-        review_comments = self._build_review_comments(section)
-
-        section_summaries: list[str] = list(state.get("section_summaries") or [])
-        previous_sections = self._build_previous_sections_context(
-            sections, current_index, section_summaries
+        writer_input = self.writer_input_builder.build(
+            state,
+            current_index=current_index,
+            evidence_packets=evidence_packets,
+            style_context=style_guidance,
         )
 
         paper_summaries: list[str] = state.get("paper_summaries") or []
@@ -500,16 +511,12 @@ class WriterNode:
         )
 
         try:
-            input_data = self._build_draft_input(
-                state,
+            input_data = self._build_prompt_input(
+                writer_input,
                 section,
                 lang,
-                outline_json,
-                previous_sections,
                 numbered_papers,
                 rag_context,
-                style_guidance,
-                review_comments,
             )
             writer = self._draft_writer_for_mode(writer_mode)
             raw_content = await writer.draft(input_data)
@@ -535,6 +542,12 @@ class WriterNode:
         claim_evidence_bindings = self.citation_binder.bind(
             section, content, state.get("papers", []), evidence_packets
         )
+        effective_bindings = [
+            binding
+            for binding in state.get("claim_evidence_bindings", [])
+            if binding.section_id != section.section_id
+        ]
+        effective_bindings.extend(claim_evidence_bindings)
 
         updated_summaries = list(state.get("section_summaries") or [])
         while len(updated_summaries) <= current_index:
@@ -544,14 +557,20 @@ class WriterNode:
         result: dict[str, Any] = {
             "sections": updated_sections,
             "section_summaries": updated_summaries,
-            "claim_evidence_bindings": claim_evidence_bindings,
+            "claim_evidence_bindings": effective_bindings,
+            "writer_input": writer_input,
             "status": "reviewing",
             "writer_diagnostics": {
                 "revision_mode": revision_mode,
                 "writer_mode": writer_mode,
                 "proposal_profile": proposal_profile,
                 "section_title": section.title,
-                "section_budget": self._section_budget(section, section_outline),
+                "section_budget": self._budget_diagnostic_value(
+                    writer_input.current_section
+                ),
+                "section_budget_spec": self._budget_spec_diagnostic_value(
+                    writer_input.current_section
+                ),
                 "compound_title_detected": is_compound_section_title(section.title),
                 "missing_core_tasks": (
                     missing_proposal_core_tasks(section.title, content)
@@ -576,7 +595,11 @@ class WriterNode:
                 type="result",
                 result={
                     "status": "completed",
-                    "sections_completed": state.get("sections_completed", []),
+                    "sections_completed": [
+                        s.title
+                        for s in sections
+                        if s.status in {"approved", "accepted_with_issues"}
+                    ],
                 },
             )
             return
@@ -601,22 +624,26 @@ class WriterNode:
         _section_summaries: list[str] = list(state.get("section_summaries") or [])
         _paper_summaries: list[str] = state.get("paper_summaries") or []
 
-        input_data = self._build_draft_input(
+        style_guidance = build_writer_style_context(
+            state, self._find_section_outline(state, section)
+        )
+        writer_input = self.writer_input_builder.build(
             state,
+            current_index=current_index,
+            evidence_packets=evidence_packets,
+            style_context=style_guidance,
+        )
+
+        input_data = self._build_prompt_input(
+            writer_input,
             section,
             lang,
-            self._build_outline_json(state.get("outline")),
-            self._build_previous_sections_context(
-                sections, current_index, _section_summaries
-            ),
             (
                 self._build_numbered_papers_from_summaries(_paper_summaries, state)
                 if _paper_summaries
                 else self._build_numbered_papers(state.get("papers", []), state)
             ),
             rag_context,
-            build_writer_style_context(state, self._find_section_outline(state, section)),
-            self._build_review_comments(section),
         )
 
         full_text = ""
@@ -629,6 +656,12 @@ class WriterNode:
         claim_evidence_bindings = self.citation_binder.bind(
             section, content, state.get("papers", []), evidence_packets
         )
+        effective_bindings = [
+            binding
+            for binding in state.get("claim_evidence_bindings", [])
+            if binding.section_id != section.section_id
+        ]
+        effective_bindings.extend(claim_evidence_bindings)
 
         updated_sections = sections.copy()
         updated_sections[current_index] = section.model_copy(
@@ -647,15 +680,19 @@ class WriterNode:
         result: dict[str, Any] = {
             "sections": updated_sections,
             "section_summaries": _updated_summaries,
-            "claim_evidence_bindings": claim_evidence_bindings,
+            "claim_evidence_bindings": effective_bindings,
+            "writer_input": writer_input,
             "status": "reviewing",
             "writer_diagnostics": {
                 "revision_mode": revision_mode,
                 "writer_mode": writer_mode,
                 "proposal_profile": proposal_profile,
                 "section_title": section.title,
-                "section_budget": self._section_budget(
-                    section, self._find_section_outline(state, section)
+                "section_budget": self._budget_diagnostic_value(
+                    writer_input.current_section
+                ),
+                "section_budget_spec": self._budget_spec_diagnostic_value(
+                    writer_input.current_section
                 ),
                 "compound_title_detected": is_compound_section_title(section.title),
                 "missing_core_tasks": (
@@ -671,6 +708,129 @@ class WriterNode:
             result["evidence_packets"] = new_evidence_packets
 
         yield NodeStreamEvent(type="result", result=result)
+
+    def _build_prompt_input(
+        self,
+        writer_input: WriterInput,
+        section: SectionDraft,
+        lang: str,
+        numbered_papers: str,
+        rag_context: str,
+    ) -> dict[str, Any]:
+        return {
+            "topic": writer_input.topic,
+            "language": t(lang, "language_name"),
+            "section_title": writer_input.current_section.title,
+            "section_description": self._build_section_description_from_spec(
+                writer_input.current_section
+            ),
+            "suggested_figures": self._build_suggested_figures_from_spec(
+                writer_input.current_section
+            ),
+            "outline_json": self._build_outline_from_writer_input(writer_input),
+            "previous_sections": self._previous_summaries_text(writer_input),
+            "numbered_papers": numbered_papers,
+            "rag_context": rag_context,
+            "style_guidance": writer_input.style_context,
+            "review_comments": self._review_comments_text(writer_input),
+            "current_content": section.content or "无",
+        }
+
+    def _build_section_description_from_spec(self, spec: SectionWritingSpec) -> str:
+        description = spec.description.strip()
+        constraints: list[str] = []
+        if spec.budget is not None:
+            budget_parts: list[str] = []
+            if spec.budget.target is not None:
+                budget_parts.append(f"target={spec.budget.target}")
+            if spec.budget.hard_limit is not None:
+                budget_parts.append(f"hard_limit={spec.budget.hard_limit}")
+            budget_parts.append(f"unit={spec.budget.unit}")
+            constraints.append("Length budget: " + ", ".join(budget_parts) + ".")
+        elif _BUDGET_RE.search(description):
+            constraints.append(
+                "Length constraint: follow the explicit budget in the section description "
+                "as the only hard length limit; ignore generic 200-500 defaults."
+            )
+        else:
+            constraints.append(
+                "Default length target: 200-500 words/characters as appropriate for the "
+                "target language, unless the outline or caller provides a stricter budget."
+            )
+
+        if spec.purpose:
+            constraints.append(f"Purpose: {spec.purpose}")
+        if spec.content_summary:
+            constraints.append(f"Content summary: {spec.content_summary}")
+        if spec.target_claims:
+            constraints.append("Target claims: " + "; ".join(spec.target_claims))
+        if spec.citation_plan:
+            constraints.append("Citation plan: " + "; ".join(spec.citation_plan))
+        if is_schedule_section(spec.title):
+            constraints.append(
+                "Schedule density: use compact wording but preserve the complete two-year "
+                "timeline, including 1年次前期, 1年次後期, 2年次前期, and 2年次後期."
+            )
+        if not description:
+            return "\n".join(constraints)
+        return f"{description}\n\n" + "\n".join(constraints)
+
+    def _build_suggested_figures_from_spec(self, spec: SectionWritingSpec) -> str:
+        if not spec.suggested_figures:
+            return "无"
+        return "\n".join(f"- {figure}" for figure in spec.suggested_figures)
+
+    def _build_outline_from_writer_input(self, writer_input: WriterInput) -> str:
+        outline = writer_input.outline_context
+        lines = [
+            f"Title: {outline.title}",
+            f"Paper type: {outline.paper_type}",
+            f"Structure pattern: {outline.structure_pattern}",
+            "",
+        ]
+        for section in outline.sections:
+            lines.append(f"- {section.title}")
+            if section.purpose:
+                lines.append(f"  Purpose: {section.purpose}")
+            if section.content_summary:
+                lines.append(f"  Content summary: {section.content_summary}")
+
+        current = writer_input.current_section
+        lines.extend(["", "Current section writing specification:"])
+        lines.append(f"- {current.title}: {current.description}")
+        if current.key_points:
+            lines.append(f"  Key points: {'; '.join(current.key_points)}")
+        if current.target_claims:
+            lines.append(f"  Target claims: {'; '.join(current.target_claims)}")
+        if current.key_sources:
+            lines.append(f"  Key sources: {'; '.join(current.key_sources)}")
+        if current.evidence_gaps:
+            lines.append(f"  Evidence gaps: {'; '.join(current.evidence_gaps)}")
+        if current.transition_to_next:
+            lines.append(f"  Transition: {current.transition_to_next}")
+        return "\n".join(lines)
+
+    def _previous_summaries_text(self, writer_input: WriterInput) -> str:
+        if not writer_input.previous_section_summaries:
+            return "无"
+        return "\n\n---\n\n".join(writer_input.previous_section_summaries)
+
+    def _review_comments_text(self, writer_input: WriterInput) -> str:
+        if not writer_input.review_comments:
+            return "无"
+        return "\n".join(f"- {comment}" for comment in writer_input.review_comments)
+
+    def _budget_diagnostic_value(self, spec: SectionWritingSpec) -> int | None:
+        if spec.budget is None:
+            return None
+        if spec.budget.hard_limit is None:
+            return spec.budget.target
+        return spec.budget.hard_limit
+
+    def _budget_spec_diagnostic_value(self, spec: SectionWritingSpec) -> dict[str, Any] | None:
+        if spec.budget is None:
+            return None
+        return spec.budget.model_dump()
 
     def _build_draft_input(
         self,
@@ -978,19 +1138,7 @@ class WriterNode:
         return "\n".join(annotate_paper_summaries(paper_summaries, papers, registry))
 
     async def _move_to_next(self, state: AgentState) -> dict[str, Any]:
-        sections = state["sections"]
-        index = state["current_section_index"]
-        completed = state.get("sections_completed", [])
-        completed.append(sections[index].title)
-
-        if index + 1 >= len(sections):
-            return {"sections_completed": completed, "status": "completed"}
-
-        return {
-            "sections_completed": completed,
-            "current_section_index": index + 1,
-            "status": "writing",
-        }
+        return self.execution_strategy.skip_completed_section_delta(state)
 
     def _clean_content(self, content: str) -> str:
         return self.style_polisher.polish(content)
