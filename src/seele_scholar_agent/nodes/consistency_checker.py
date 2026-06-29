@@ -27,7 +27,7 @@ def _build_sections_summary_from_state(
     """
     parts: list[str] = []
     for i, section in enumerate(sections):
-        if section.status not in ("approved", "auto_generated"):
+        if section.status not in ("approved", "accepted_with_issues", "auto_generated"):
             continue
         if i < len(section_summaries) and section_summaries[i]:
             parts.append(section_summaries[i])
@@ -47,7 +47,11 @@ class ConsistencyCheckerNode:
 
     async def check(self, state: AgentState) -> dict[str, Any]:
         sections = state.get("sections", [])
-        approved = [s for s in sections if s.status in ("approved", "auto_generated")]
+        approved = [
+            s
+            for s in sections
+            if s.status in ("approved", "accepted_with_issues", "auto_generated")
+        ]
 
         if len(approved) < 2:
             logger.info("not enough approved sections for consistency check")
@@ -80,7 +84,11 @@ class ConsistencyCheckerNode:
 
     async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
         sections = state.get("sections", [])
-        approved = [s for s in sections if s.status in ("approved", "auto_generated")]
+        approved = [
+            s
+            for s in sections
+            if s.status in ("approved", "accepted_with_issues", "auto_generated")
+        ]
 
         if len(approved) < 2:
             yield NodeStreamEvent(

@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage
 from seele_scholar_agent.nodes.writer import WriterNode
 from seele_scholar_agent.state import (
     AgentState,
+    ClaimEvidenceBinding,
     DocumentChunk,
     EvidencePacket,
     MaterialRegistry,
@@ -531,6 +532,44 @@ async def test_writer_returns_evidence_packets_and_claim_bindings(
     assert binding.citation_number == 1
     assert binding.chunk_id == "c1"
     assert binding.verdict == "supported"
+
+
+@pytest.mark.asyncio
+async def test_writer_replaces_existing_claim_bindings_for_current_section(
+    mock_llm, mock_prompts, state_with_outline, sample_papers
+):
+    stale_binding = ClaimEvidenceBinding(
+        section_id="section_0",
+        claim_text="Old claim [1].",
+        citation_number=1,
+        chunk_id="old",
+        verdict="supported",
+    )
+    other_section_binding = ClaimEvidenceBinding(
+        section_id="section_1",
+        claim_text="Other section claim [1].",
+        citation_number=1,
+        chunk_id="other",
+        verdict="supported",
+    )
+    state = {
+        **state_with_outline,
+        "papers": sample_papers,
+        "claim_evidence_bindings": [stale_binding, other_section_binding],
+    }
+
+    with patch(
+        "seele_scholar_agent.nodes.writer.invoke_with_retry",
+        new_callable=AsyncMock,
+        return_value=AIMessage(content="The Transformer architecture uses attention [1]."),
+    ):
+        node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+        result = await node.write(state)
+
+    bindings = result["claim_evidence_bindings"]
+    assert all(binding.chunk_id != "old" for binding in bindings)
+    assert any(binding.chunk_id == "other" for binding in bindings)
+    assert any(binding.section_id == "section_0" for binding in bindings)
 
 
 def test_citation_binder_extracts_multiple_cited_factual_claims(mock_llm, mock_prompts):

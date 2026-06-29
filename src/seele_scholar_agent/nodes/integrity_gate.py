@@ -4,6 +4,7 @@ from typing import Any
 from ..config import settings
 from ..document_profile import is_research_proposal
 from ..logging import get_logger
+from ..policy import build_quality_report
 from ..state import AgentState, ClaimEvidenceBinding, EvidencePacket, QualityIssue
 from . import CITATION_PATTERN, NodeStreamEvent
 
@@ -38,11 +39,17 @@ class IntegrityGateNode:
             return {
                 "status": "waiting_human",
                 "error_message": self._build_error_message(blocking_issues),
-                "quality_issues": strict_issues,
+                "quality_issues": quality_issues,
+                "quality_report": build_quality_report({**state, "quality_issues": quality_issues}),
             }
 
         logger.info("integrity gate passed")
-        return {"status": "completed", "error_message": None, "quality_issues": strict_issues}
+        return {
+            "status": "completed",
+            "error_message": None,
+            "quality_issues": quality_issues,
+            "quality_report": build_quality_report({**state, "quality_issues": quality_issues}),
+        }
 
     async def astream(self, state: AgentState) -> AsyncIterator[NodeStreamEvent]:
         yield NodeStreamEvent(type="progress", progress="checking_integrity")

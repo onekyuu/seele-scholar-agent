@@ -28,7 +28,12 @@ def _is_conclusion_section(title: str) -> bool:
 def _build_completed_sections_summary(sections: list[SectionDraft], max_chars: int = 800) -> str:
     parts = []
     for s in sections:
-        if s.content and s.status in ("approved", "review", "auto_generated"):
+        if s.content and s.status in (
+            "approved",
+            "accepted_with_issues",
+            "review",
+            "auto_generated",
+        ):
             snippet = s.content[:max_chars]
             if len(s.content) > max_chars:
                 snippet += "..."
