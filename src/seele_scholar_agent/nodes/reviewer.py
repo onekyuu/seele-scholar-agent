@@ -101,7 +101,6 @@ class ReviewerNode:
 
         section = sections[index]
         document_profile = get_document_profile(state)
-        proposal_profile = document_profile.uses_specialized_review_policy
 
         logger.info("reviewing section", title=section.title)
 
@@ -180,7 +179,7 @@ class ReviewerNode:
             section.title,
             section.content,
             state,
-            proposal_profile=proposal_profile,
+            document_profile=document_profile,
         )
         quality_issues = [*quality_issues, *paragraph_quality_issues]
         if paragraph_issues:
@@ -261,7 +260,6 @@ class ReviewerNode:
 
         section = sections[index]
         document_profile = get_document_profile(state)
-        proposal_profile = document_profile.uses_specialized_review_policy
         yield NodeStreamEvent(type="progress", progress=f"reviewing:{section.title}")
 
         input_data = {
@@ -344,7 +342,7 @@ class ReviewerNode:
             section.title,
             section.content,
             state,
-            proposal_profile=proposal_profile,
+            document_profile=document_profile,
         )
         quality_issues = [*quality_issues, *paragraph_quality_issues]
         if paragraph_issues:
@@ -673,7 +671,7 @@ class ReviewerNode:
         content: str,
         state: AgentState,
         *,
-        proposal_profile: bool = False,
+        document_profile: DocumentProfile,
     ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
         outline = state.get("outline")
         section_outline = None
@@ -686,7 +684,7 @@ class ReviewerNode:
             section_title=section_title,
             content=content,
             section_outline=section_outline,
-            proposal_profile=proposal_profile,
+            include_structure_check=document_profile.include_paragraph_structure_check(),
         )
 
         review_issues = [self._paragraph_review_issue(finding) for finding in findings]

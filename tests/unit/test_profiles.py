@@ -19,6 +19,7 @@ def test_default_profile_review_input_policy():
     assert profile.citation_alignment_uses_cited_context() is False
     assert profile.citation_review_category() == "content_quality"
     assert profile.should_emit_claim_source_review_issue("unsupported_binding") is True
+    assert profile.include_paragraph_structure_check() is True
 
 
 def test_research_proposal_profile_review_input_policy():
@@ -30,6 +31,7 @@ def test_research_proposal_profile_review_input_policy():
     assert profile.citation_alignment_uses_cited_context() is True
     assert profile.citation_review_category() == "citation_warning"
     assert profile.should_emit_claim_source_review_issue("unsupported_binding") is False
+    assert profile.include_paragraph_structure_check() is False
 
 
 def test_research_proposal_profile_flags_incomplete_schedule():
