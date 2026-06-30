@@ -215,10 +215,9 @@ class ReviewerNode:
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
-        if proposal_profile:
-            review, quality_issues = self._apply_proposal_review_policy(
-                review, quality_issues, section
-            )
+        review, quality_issues = document_profile.apply_review_policy(
+            review, quality_issues
+        )
 
         record = {
             "section": section.title,
@@ -380,10 +379,9 @@ class ReviewerNode:
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
-        if proposal_profile:
-            review, quality_issues = self._apply_proposal_review_policy(
-                review, quality_issues, section
-            )
+        review, quality_issues = document_profile.apply_review_policy(
+            review, quality_issues
+        )
 
         record = {
             "section": section.title,
@@ -839,191 +837,6 @@ class ReviewerNode:
                 "audit_source": "claim_source",
             },
         )
-
-    def _apply_proposal_review_policy(
-        self,
-        review: ReviewResult,
-        quality_issues: list[QualityIssue],
-        section: Any,
-    ) -> tuple[ReviewResult, list[QualityIssue]]:
-        structural_issues, structural_quality_issues = self._audit_proposal_core_structure(
-            section.section_id, section.title, section.content
-        )
-        if structural_issues:
-            review.issues.extend(structural_issues)
-            quality_issues = [*quality_issues, *structural_quality_issues]
-
-        normalized_issues = [
-            self._normalize_proposal_review_issue(issue) for issue in review.issues
-        ]
-        has_blocking_issue = any(issue.blocking for issue in normalized_issues) or any(
-            issue.blocking or issue.severity == "blocking" for issue in quality_issues
-        )
-
-        approved = review.approved
-        if has_blocking_issue:
-            approved = False
-        elif review.score >= 7:
-            approved = True
-
-        return review.model_copy(
-            update={"approved": approved, "issues": normalized_issues}
-        ), quality_issues
-
-    def _audit_proposal_core_structure(
-        self, section_id: str, section_title: str, content: str
-    ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
-        issues: list[ReviewIssue] = []
-        quality_issues: list[QualityIssue] = []
-        stripped = content.strip()
-
-        if not stripped:
-            issue = self._proposal_blocking_issue(
-                "PROPOSAL_SECTION_EMPTY",
-                "Proposal section is empty.",
-                "Write a compact section that addresses the title's core task.",
-                section_title,
-            )
-            return [issue], [self._proposal_quality_issue(issue, section_id)]
-
-        if self._looks_truncated(stripped):
-            issue = self._proposal_blocking_issue(
-                "PROPOSAL_SECTION_TRUNCATED",
-                "Proposal section appears truncated or ends with an incomplete sentence.",
-                "Complete the final sentence while staying within the section budget.",
-                section_title,
-            )
-            issues.append(issue)
-            quality_issues.append(self._proposal_quality_issue(issue, section_id))
-
-        enumeration_issue = self._proposal_enumeration_issue(section_title, stripped)
-        if enumeration_issue is not None:
-            issues.append(enumeration_issue)
-            quality_issues.append(self._proposal_quality_issue(enumeration_issue, section_id))
-
-        missing_core_tasks = missing_proposal_core_tasks(section_title, stripped)
-        if missing_core_tasks:
-            issue = self._proposal_blocking_issue(
-                "PROPOSAL_CORE_TASK_MISSING",
-                (
-                    "Proposal section is missing title-core task(s): "
-                    + ", ".join(missing_core_tasks)
-                ),
-                (
-                    "Add overview-level coverage for the missing task(s); do not expand "
-                    "into a full paper-style subsection."
-                ),
-                section_title,
-                details={"missing_core_tasks": missing_core_tasks},
-            )
-            issues.append(issue)
-            quality_issues.append(self._proposal_quality_issue(issue, section_id))
-
-        return issues, quality_issues
-
-    def _proposal_blocking_issue(
-        self,
-        code: str,
-        description: str,
-        suggestion: str,
-        location: str,
-        *,
-        details: dict[str, Any] | None = None,
-    ) -> ReviewIssue:
-        _ = code, details
-        return ReviewIssue(
-            type="format_issue",
-            description=description,
-            suggestion=suggestion,
-            location=location,
-            blocking=True,
-            category="blocking",
-        )
-
-    def _proposal_quality_issue(
-        self, review_issue: ReviewIssue, section_id: str
-    ) -> QualityIssue:
-        return QualityIssue(
-            code=self._proposal_quality_code(review_issue.description),
-            message=review_issue.description,
-            severity="blocking",
-            location=review_issue.location,
-            blocking=True,
-            details={
-                "section_id": section_id,
-                "audit_source": "proposal_structure",
-                "category": review_issue.category,
-            },
-        )
-
-    def _proposal_quality_code(self, description: str) -> str:
-        if "truncated" in description or "incomplete sentence" in description:
-            return "PROPOSAL_SECTION_TRUNCATED"
-        if "missing title-core task" in description:
-            return "PROPOSAL_CORE_TASK_MISSING"
-        if "enumeration" in description or "declares" in description:
-            return "PROPOSAL_ENUMERATION_INCONSISTENT"
-        return "PROPOSAL_SECTION_STRUCTURAL_BLOCK"
-
-    def _looks_truncated(self, content: str) -> bool:
-        if content.endswith(("。", ".", "!", "?", "！", "？", "」", "』", "）", ")", "】")):
-            return False
-        return True
-
-    def _proposal_enumeration_issue(
-        self, section_title: str, content: str
-    ) -> ReviewIssue | None:
-        declared_count = self._declared_enumeration_count(content)
-        if declared_count is None:
-            return None
-        actual_count = self._actual_enumeration_count(content)
-        if actual_count >= declared_count:
-            return None
-        return self._proposal_blocking_issue(
-            "PROPOSAL_ENUMERATION_INCONSISTENT",
-            (
-                f"Section declares {declared_count} points/stages but only "
-                f"{actual_count} are explicitly developed."
-            ),
-            (
-                "Make the declared number match the actual text, or add the missing "
-                "point/stage compactly."
-            ),
-            section_title,
-            details={"declared_count": declared_count, "actual_count": actual_count},
-        )
-
-    def _declared_enumeration_count(self, content: str) -> int | None:
-        patterns: tuple[tuple[str, int], ...] = (
-            (r"(?:三点|3点|三つ|三段階|3段階|three (?:points|stages))", 3),
-            (r"(?:二点|2点|二つ|二段階|2段階|two (?:points|stages))", 2),
-        )
-        for pattern, count in patterns:
-            if re.search(pattern, content, re.IGNORECASE):
-                return count
-        return None
-
-    def _actual_enumeration_count(self, content: str) -> int:
-        markers = re.findall(
-            r"(?:第[一二三四五](?:に|段階|ステップ)|[一二三四五]つ目|[（(]?[1-5][）).、]|"
-            r"\b(?:first|second|third|fourth|fifth)\b)",
-            content,
-            re.IGNORECASE,
-        )
-        return len(set(markers))
-
-    def _normalize_proposal_review_issue(self, issue: ReviewIssue) -> ReviewIssue:
-        if issue.blocking:
-            return issue.model_copy(update={"category": "blocking"})
-        if issue.type in {"missing_citation", "citation_mismatch"}:
-            return issue.model_copy(
-                update={"blocking": False, "category": "citation_warning"}
-            )
-        if issue.type == "factual_error":
-            return issue.model_copy(update={"blocking": True, "category": "blocking"})
-        if issue.type == "format_issue":
-            return issue.model_copy(update={"blocking": False, "category": "format"})
-        return issue.model_copy(update={"blocking": False, "category": "content_quality"})
 
     def _is_proposal_deferred_claim(
         self, claim: ExtractedClaim, section_title: str
