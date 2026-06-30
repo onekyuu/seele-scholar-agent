@@ -6,6 +6,10 @@ from ..document_profile import is_research_proposal
 from ..state import OutlineStructure, QualityIssue, ReviewIssue, ReviewResult, SectionOutline
 
 WriterMode = Literal["draft", "academic_revision", "profile_draft", "profile_revision"]
+ReviewIssueCategory = Literal["blocking", "content_quality", "citation_warning", "format"]
+ClaimSourceAuditCase = Literal[
+    "missing_citation", "missing_evidence_packet", "unsupported_binding"
+]
 DEFAULT_PROFILE_NAME = "default"
 PROFILE_DRAFT_MODE: Literal["profile_draft"] = "profile_draft"
 PROFILE_REVISION_MODE: Literal["profile_revision"] = "profile_revision"
@@ -49,6 +53,20 @@ class DocumentProfile(Protocol):
     def should_defer_claim(
         self, claim_text: str, citation_numbers: tuple[int, ...], section_title: str
     ) -> bool: ...
+
+    def citation_alignment_uses_cited_context(self) -> bool: ...
+
+    def citation_review_category(self) -> ReviewIssueCategory: ...
+
+    def should_emit_claim_source_review_issue(self, audit_case: ClaimSourceAuditCase) -> bool: ...
+
+    def claim_source_quality_issue(
+        self,
+        quality_issue: QualityIssue,
+        *,
+        audit_source: str,
+        binding_diagnostics: dict[str, Any] | None = None,
+    ) -> QualityIssue: ...
 
     def empty_reference_issue(self) -> QualityIssue | None: ...
 
@@ -113,6 +131,24 @@ class DefaultDocumentProfile:
         self, claim_text: str, citation_numbers: tuple[int, ...], section_title: str
     ) -> bool:
         return False
+
+    def citation_alignment_uses_cited_context(self) -> bool:
+        return False
+
+    def citation_review_category(self) -> ReviewIssueCategory:
+        return "content_quality"
+
+    def should_emit_claim_source_review_issue(self, audit_case: ClaimSourceAuditCase) -> bool:
+        return True
+
+    def claim_source_quality_issue(
+        self,
+        quality_issue: QualityIssue,
+        *,
+        audit_source: str,
+        binding_diagnostics: dict[str, Any] | None = None,
+    ) -> QualityIssue:
+        return quality_issue
 
     def empty_reference_issue(self) -> QualityIssue | None:
         return None

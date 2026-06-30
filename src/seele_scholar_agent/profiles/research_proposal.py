@@ -18,7 +18,9 @@ from ..state import (
 from .base import (
     PROFILE_DRAFT_MODE,
     PROFILE_REVISION_MODE,
+    ClaimSourceAuditCase,
     ProfileWriterPrompts,
+    ReviewIssueCategory,
     WriterMode,
 )
 
@@ -214,6 +216,36 @@ class ResearchProposalProfile:
         self, claim_text: str, citation_numbers: tuple[int, ...], section_title: str
     ) -> bool:
         return not citation_numbers and is_proposal_plan_sentence(claim_text, section_title)
+
+    def citation_alignment_uses_cited_context(self) -> bool:
+        return True
+
+    def citation_review_category(self) -> ReviewIssueCategory:
+        return "citation_warning"
+
+    def should_emit_claim_source_review_issue(self, audit_case: ClaimSourceAuditCase) -> bool:
+        return audit_case != "unsupported_binding"
+
+    def claim_source_quality_issue(
+        self,
+        quality_issue: QualityIssue,
+        *,
+        audit_source: str,
+        binding_diagnostics: dict[str, Any] | None = None,
+    ) -> QualityIssue:
+        details = {
+            **quality_issue.details,
+            "audit_source": audit_source,
+            "deferred": True,
+        }
+        if binding_diagnostics is not None:
+            details["binding_diagnostics"] = binding_diagnostics
+        return quality_issue.model_copy(
+            update={
+                "severity": "warning",
+                "details": details,
+            }
+        )
 
     def empty_reference_issue(self) -> QualityIssue | None:
         return QualityIssue(

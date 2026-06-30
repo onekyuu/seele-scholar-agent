@@ -144,7 +144,7 @@ class ReviewerNode:
         papers = state.get("papers", [])
         if papers and section.content:
             alignment_issues = await self._verify_citation_alignment(
-                section.title, section.content, papers, proposal_profile=proposal_profile
+                section.title, section.content, papers, document_profile=document_profile
             )
             if alignment_issues:
                 review.issues.extend(alignment_issues)
@@ -308,7 +308,7 @@ class ReviewerNode:
         if papers and section.content:
             yield NodeStreamEvent(type="progress", progress="verifying_citations")
             alignment_issues = await self._verify_citation_alignment(
-                section.title, section.content, papers, proposal_profile=proposal_profile
+                section.title, section.content, papers, document_profile=document_profile
             )
             if alignment_issues:
                 review.issues.extend(alignment_issues)
@@ -446,7 +446,7 @@ class ReviewerNode:
         content: str,
         papers: list[PaperMetadata],
         *,
-        proposal_profile: bool = False,
+        document_profile: DocumentProfile,
     ) -> list[ReviewIssue]:
         cited_numbers = {int(m) for m in CITATION_PATTERN.findall(content)}
         valid_cited = {n for n in cited_numbers if 1 <= n <= len(papers)}
@@ -454,8 +454,11 @@ class ReviewerNode:
             return []
 
         content_for_alignment = (
-            self._cited_sentence_context(content) if proposal_profile else content
+            self._cited_sentence_context(content)
+            if document_profile.citation_alignment_uses_cited_context()
+            else content
         )
+        category = document_profile.citation_review_category()
         numbered_papers = _build_numbered_papers_summary(papers)
         try:
             result = await invoke_with_retry(
@@ -474,9 +477,7 @@ class ReviewerNode:
                     suggestion=item.get("suggestion", ""),
                     location=f"[{item.get('citation_number', '?')}]",
                     blocking=False,
-                    category=(
-                        "citation_warning" if proposal_profile else "content_quality"
-                    ),
+                    category=category,
                 )
                 for item in raw_issues
             ]
@@ -493,7 +494,7 @@ class ReviewerNode:
         *,
         document_profile: DocumentProfile,
     ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
-        proposal_profile = document_profile.uses_specialized_review_policy
+        citation_category = document_profile.citation_review_category()
         section_bindings = [binding for binding in bindings if binding.section_id == section_id]
         issues: list[ReviewIssue] = []
         quality_issues: list[QualityIssue] = []
@@ -516,30 +517,18 @@ class ReviewerNode:
                     suggestion="Add a valid citation backed by an evidence packet or revise it.",
                     location=claim.text[:80],
                     blocking=False,
-                    category=(
-                        "citation_warning" if proposal_profile else "content_quality"
-                    ),
+                    category=citation_category,
                 )
                 quality_issue = self._claim_quality_issue(
                     "UNSUPPORTED_CLAIM", issue, section_id, claim
                 )
-                if proposal_profile:
+                quality_issue = document_profile.claim_source_quality_issue(
+                    quality_issue,
+                    audit_source="claim_source",
+                )
+                if document_profile.should_emit_claim_source_review_issue("missing_citation"):
                     issues.append(issue)
-                    quality_issues.append(
-                        quality_issue.model_copy(
-                            update={
-                                "severity": "warning",
-                                "details": {
-                                    **quality_issue.details,
-                                    "audit_source": "claim_source",
-                                    "deferred": True,
-                                },
-                            }
-                        )
-                    )
-                else:
-                    issues.append(issue)
-                    quality_issues.append(quality_issue)
+                quality_issues.append(quality_issue)
                 continue
 
             for citation_number in claim.citation_numbers:
@@ -558,30 +547,20 @@ class ReviewerNode:
                         suggestion="Bind the cited claim to an evidence packet before approval.",
                         location=f"[{citation_number}]",
                         blocking=False,
-                        category=(
-                            "citation_warning" if proposal_profile else "content_quality"
-                        ),
+                        category=citation_category,
                     )
                     quality_issue = self._claim_quality_issue(
                         "CLAIM_MISSING_EVIDENCE_PACKET", issue, section_id, claim
                     )
-                    if proposal_profile:
+                    quality_issue = document_profile.claim_source_quality_issue(
+                        quality_issue,
+                        audit_source="evidence_binding",
+                    )
+                    if document_profile.should_emit_claim_source_review_issue(
+                        "missing_evidence_packet"
+                    ):
                         issues.append(issue)
-                        quality_issues.append(
-                            quality_issue.model_copy(
-                                update={
-                                    "severity": "warning",
-                                    "details": {
-                                        **quality_issue.details,
-                                        "audit_source": "evidence_binding",
-                                        "deferred": True,
-                                    },
-                                }
-                            )
-                        )
-                    else:
-                        issues.append(issue)
-                        quality_issues.append(quality_issue)
+                    quality_issues.append(quality_issue)
                     continue
 
                 best_binding = max(
@@ -595,28 +574,18 @@ class ReviewerNode:
                 if best_binding.verdict == "supported" and best_binding.chunk_id:
                     continue
                 issue = self._unsupported_binding_issue(best_binding)
-                if proposal_profile:
-                    issue = issue.model_copy(update={"category": "citation_warning"})
+                issue = issue.model_copy(update={"category": citation_category})
                 quality_issue = self._claim_quality_issue(
                     "UNSUPPORTED_CLAIM", issue, section_id, claim
                 )
-                if proposal_profile:
-                    quality_issues.append(
-                        quality_issue.model_copy(
-                            update={
-                                "severity": "warning",
-                                "details": {
-                                    **quality_issue.details,
-                                    "audit_source": "evidence_binding",
-                                    "deferred": True,
-                                    "binding_diagnostics": best_binding.diagnostics,
-                                },
-                            }
-                        )
-                    )
-                else:
+                quality_issue = document_profile.claim_source_quality_issue(
+                    quality_issue,
+                    audit_source="evidence_binding",
+                    binding_diagnostics=best_binding.diagnostics,
+                )
+                if document_profile.should_emit_claim_source_review_issue("unsupported_binding"):
                     issues.append(issue)
-                    quality_issues.append(quality_issue)
+                quality_issues.append(quality_issue)
 
         for binding in section_bindings:
             if binding.verdict == "supported" and binding.chunk_id:
@@ -627,8 +596,7 @@ class ReviewerNode:
             ):
                 continue
             issue = self._unsupported_binding_issue(binding)
-            if proposal_profile:
-                issue = issue.model_copy(update={"category": "citation_warning"})
+            issue = issue.model_copy(update={"category": citation_category})
             claim = ExtractedClaim(
                 text=binding.claim_text,
                 citation_numbers=(binding.citation_number,),
@@ -640,23 +608,14 @@ class ReviewerNode:
                 section_id,
                 claim,
             )
-            if proposal_profile:
-                quality_issues.append(
-                    quality_issue.model_copy(
-                        update={
-                            "severity": "warning",
-                            "details": {
-                                **quality_issue.details,
-                                "audit_source": "evidence_binding",
-                                "deferred": True,
-                                "binding_diagnostics": binding.diagnostics,
-                            },
-                        }
-                    )
-                )
-            else:
+            quality_issue = document_profile.claim_source_quality_issue(
+                quality_issue,
+                audit_source="evidence_binding",
+                binding_diagnostics=binding.diagnostics,
+            )
+            if document_profile.should_emit_claim_source_review_issue("unsupported_binding"):
                 issues.append(issue)
-                quality_issues.append(quality_issue)
+            quality_issues.append(quality_issue)
 
         return issues, quality_issues
 
