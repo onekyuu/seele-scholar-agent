@@ -827,7 +827,9 @@ async def test_proposal_schedule_rewrite_prompt_requires_two_year_timeline(
     ].content
     assert result["writer_diagnostics"]["revision_mode"] is True
     assert result["writer_diagnostics"]["proposal_profile"] is True
+    assert result["writer_diagnostics"]["schedule_section"] is True
     assert captured_input["current_content"] == "1年次前期に文献調査を行う。"
+    assert "Schedule density" in captured_input["section_description"]
     assert "2年次の研究計画が欠落" in captured_input["review_comments"]
     for phase in ("1年次前期", "1年次後期", "2年次前期", "2年次後期"):
         assert phase in rendered_user_prompt
