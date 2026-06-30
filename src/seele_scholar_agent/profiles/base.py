@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from ..document_profile import is_research_proposal
-from ..state import OutlineStructure, QualityIssue, ReviewIssue, SectionOutline
+from ..state import OutlineStructure, QualityIssue, ReviewIssue, ReviewResult, SectionOutline
 
 WriterMode = Literal["draft", "academic_revision", "profile_draft", "profile_revision"]
 DEFAULT_PROFILE_NAME = "default"
@@ -50,6 +50,10 @@ class DocumentProfile(Protocol):
     def structural_review_issues(
         self, section_id: str, section_title: str, content: str
     ) -> tuple[list[ReviewIssue], list[QualityIssue]]: ...
+
+    def apply_review_policy(
+        self, review: ReviewResult, quality_issues: list[QualityIssue]
+    ) -> tuple[ReviewResult, list[QualityIssue]]: ...
 
     def outline_section_issues(
         self, section: SectionOutline, *, is_last: bool
@@ -104,6 +108,11 @@ class DefaultDocumentProfile:
         self, section_id: str, section_title: str, content: str
     ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
         return [], []
+
+    def apply_review_policy(
+        self, review: ReviewResult, quality_issues: list[QualityIssue]
+    ) -> tuple[ReviewResult, list[QualityIssue]]:
+        return review, quality_issues
 
     def outline_section_issues(
         self, section: SectionOutline, *, is_last: bool

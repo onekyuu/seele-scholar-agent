@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from ..document_profile import (
@@ -9,6 +10,7 @@ from ..state import (
     OutlineStructure,
     QualityIssue,
     ReviewIssue,
+    ReviewResult,
     SectionEvidencePlan,
     SectionOutline,
 )
@@ -222,40 +224,201 @@ class ResearchProposalProfile:
     def structural_review_issues(
         self, section_id: str, section_title: str, content: str
     ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
-        if not is_schedule_section(section_title):
-            return [], []
+        issues: list[ReviewIssue] = []
+        quality_issues: list[QualityIssue] = []
 
-        missing = missing_schedule_phases(content)
-        if not missing:
-            return [], []
+        if is_schedule_section(section_title):
+            missing = missing_schedule_phases(content)
+            if missing:
+                issue = ReviewIssue(
+                    type="format_issue",
+                    description=(
+                        "Research proposal schedule is incomplete; missing phases: "
+                        + ", ".join(missing)
+                    ),
+                    suggestion=(
+                        "Revise the schedule to cover 1年次前期, 1年次後期, 2年次前期, "
+                        "and 2年次後期, with tasks and deliverables for each phase."
+                    ),
+                    location=section_title,
+                    blocking=True,
+                    category="blocking",
+                )
+                quality_issue = QualityIssue(
+                    code="PROPOSAL_SCHEDULE_PHASES_MISSING",
+                    message=issue.description,
+                    severity="blocking",
+                    location=section_title,
+                    blocking=True,
+                    details={
+                        "section_id": section_id,
+                        "audit_source": "structural",
+                        "missing_phases": missing,
+                    },
+                )
+                issues.append(issue)
+                quality_issues.append(quality_issue)
 
-        issue = ReviewIssue(
+        core_issues, core_quality_issues = self._core_structure_issues(
+            section_id, section_title, content
+        )
+        return [*issues, *core_issues], [*quality_issues, *core_quality_issues]
+
+    def apply_review_policy(
+        self, review: ReviewResult, quality_issues: list[QualityIssue]
+    ) -> tuple[ReviewResult, list[QualityIssue]]:
+        normalized_issues = [self._normalize_review_issue(issue) for issue in review.issues]
+        has_blocking_issue = any(issue.blocking for issue in normalized_issues) or any(
+            issue.blocking or issue.severity == "blocking" for issue in quality_issues
+        )
+
+        approved = review.approved
+        if has_blocking_issue:
+            approved = False
+        elif review.score >= 7:
+            approved = True
+
+        return review.model_copy(
+            update={"approved": approved, "issues": normalized_issues}
+        ), quality_issues
+
+    def _core_structure_issues(
+        self, section_id: str, section_title: str, content: str
+    ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
+        issues: list[ReviewIssue] = []
+        quality_issues: list[QualityIssue] = []
+        stripped = content.strip()
+
+        if not stripped:
+            issue = self._blocking_review_issue(
+                "Proposal section is empty.",
+                "Write a compact section that addresses the title's core task.",
+                section_title,
+            )
+            return [issue], [self._quality_issue(issue, section_id)]
+
+        if self._looks_truncated(stripped):
+            issue = self._blocking_review_issue(
+                "Proposal section appears truncated or ends with an incomplete sentence.",
+                "Complete the final sentence while staying within the section budget.",
+                section_title,
+            )
+            issues.append(issue)
+            quality_issues.append(self._quality_issue(issue, section_id))
+
+        enumeration_issue = self._enumeration_issue(section_title, stripped)
+        if enumeration_issue is not None:
+            issues.append(enumeration_issue)
+            quality_issues.append(self._quality_issue(enumeration_issue, section_id))
+
+        missing_core_tasks = missing_proposal_core_tasks(section_title, stripped)
+        if missing_core_tasks:
+            issue = self._blocking_review_issue(
+                "Proposal section is missing title-core task(s): "
+                + ", ".join(missing_core_tasks),
+                (
+                    "Add overview-level coverage for the missing task(s); do not expand "
+                    "into a full paper-style subsection."
+                ),
+                section_title,
+            )
+            issues.append(issue)
+            quality_issues.append(self._quality_issue(issue, section_id))
+
+        return issues, quality_issues
+
+    def _blocking_review_issue(
+        self, description: str, suggestion: str, location: str
+    ) -> ReviewIssue:
+        return ReviewIssue(
             type="format_issue",
-            description=(
-                "Research proposal schedule is incomplete; missing phases: "
-                + ", ".join(missing)
-            ),
-            suggestion=(
-                "Revise the schedule to cover 1年次前期, 1年次後期, 2年次前期, "
-                "and 2年次後期, with tasks and deliverables for each phase."
-            ),
-            location=section_title,
+            description=description,
+            suggestion=suggestion,
+            location=location,
             blocking=True,
             category="blocking",
         )
-        quality_issue = QualityIssue(
-            code="PROPOSAL_SCHEDULE_PHASES_MISSING",
-            message=issue.description,
+
+    def _quality_issue(self, review_issue: ReviewIssue, section_id: str) -> QualityIssue:
+        return QualityIssue(
+            code=self._quality_code(review_issue.description),
+            message=review_issue.description,
             severity="blocking",
-            location=section_title,
+            location=review_issue.location,
             blocking=True,
             details={
                 "section_id": section_id,
-                "audit_source": "structural",
-                "missing_phases": missing,
+                "audit_source": "proposal_structure",
+                "category": review_issue.category,
             },
         )
-        return [issue], [quality_issue]
+
+    def _quality_code(self, description: str) -> str:
+        if "truncated" in description or "incomplete sentence" in description:
+            return "PROPOSAL_SECTION_TRUNCATED"
+        if "missing title-core task" in description:
+            return "PROPOSAL_CORE_TASK_MISSING"
+        if "enumeration" in description or "declares" in description:
+            return "PROPOSAL_ENUMERATION_INCONSISTENT"
+        return "PROPOSAL_SECTION_STRUCTURAL_BLOCK"
+
+    def _looks_truncated(self, content: str) -> bool:
+        if content.endswith(("。", ".", "!", "?", "！", "？", "」", "』", "）", ")", "】")):
+            return False
+        return True
+
+    def _enumeration_issue(
+        self, section_title: str, content: str
+    ) -> ReviewIssue | None:
+        declared_count = self._declared_enumeration_count(content)
+        if declared_count is None:
+            return None
+        actual_count = self._actual_enumeration_count(content)
+        if actual_count >= declared_count:
+            return None
+        return self._blocking_review_issue(
+            (
+                f"Section declares {declared_count} points/stages but only "
+                f"{actual_count} are explicitly developed."
+            ),
+            (
+                "Make the declared number match the actual text, or add the missing "
+                "point/stage compactly."
+            ),
+            section_title,
+        )
+
+    def _declared_enumeration_count(self, content: str) -> int | None:
+        patterns: tuple[tuple[str, int], ...] = (
+            (r"(?:三点|3点|三つ|三段階|3段階|three (?:points|stages))", 3),
+            (r"(?:二点|2点|二つ|二段階|2段階|two (?:points|stages))", 2),
+        )
+        for pattern, count in patterns:
+            if re.search(pattern, content, re.IGNORECASE):
+                return count
+        return None
+
+    def _actual_enumeration_count(self, content: str) -> int:
+        markers = re.findall(
+            r"(?:第[一二三四五](?:に|段階|ステップ)|[一二三四五]つ目|[（(]?[1-5][）).、]|"
+            r"\b(?:first|second|third|fourth|fifth)\b)",
+            content,
+            re.IGNORECASE,
+        )
+        return len(set(markers))
+
+    def _normalize_review_issue(self, issue: ReviewIssue) -> ReviewIssue:
+        if issue.blocking:
+            return issue.model_copy(update={"category": "blocking"})
+        if issue.type in {"missing_citation", "citation_mismatch"}:
+            return issue.model_copy(
+                update={"blocking": False, "category": "citation_warning"}
+            )
+        if issue.type == "factual_error":
+            return issue.model_copy(update={"blocking": True, "category": "blocking"})
+        if issue.type == "format_issue":
+            return issue.model_copy(update={"blocking": False, "category": "format"})
+        return issue.model_copy(update={"blocking": False, "category": "content_quality"})
 
     def outline_section_issues(
         self, section: SectionOutline, *, is_last: bool
