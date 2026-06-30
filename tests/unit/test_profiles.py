@@ -11,6 +11,11 @@ def test_default_profile_review_input_policy():
     assert profile.review_document_type == "academic_paper"
     assert profile.uses_specialized_review_policy is False
     assert profile.review_policy_text() == "Review as an academic paper section."
+    assert profile.review_diagnostic_fields("Methods", "content") == {
+        "proposal_profile": False,
+        "reviewer_mode": "academic_review",
+        "missing_core_tasks": [],
+    }
 
 
 def test_research_proposal_profile_review_input_policy():
@@ -45,6 +50,11 @@ def test_research_proposal_profile_flags_missing_core_tasks():
 
     assert any(issue.blocking for issue in review_issues)
     assert "PROPOSAL_CORE_TASK_MISSING" in {issue.code for issue in quality_issues}
+    diagnostics = profile.review_diagnostic_fields(
+        "研究方法・計画",
+        "本研究の目的は音響体験を明らかにすることである。",
+    )
+    assert set(diagnostics["missing_core_tasks"]) >= {"method", "plan"}
 
 
 def test_research_proposal_profile_defers_plan_claim_without_citation():

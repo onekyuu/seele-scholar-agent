@@ -60,6 +60,8 @@ class DocumentProfile(Protocol):
         self, review: ReviewResult, quality_issues: list[QualityIssue]
     ) -> tuple[ReviewResult, list[QualityIssue]]: ...
 
+    def review_diagnostic_fields(self, section_title: str, content: str) -> dict[str, Any]: ...
+
     def outline_section_issues(
         self, section: SectionOutline, *, is_last: bool
     ) -> list[QualityIssue]: ...
@@ -124,6 +126,13 @@ class DefaultDocumentProfile:
         self, review: ReviewResult, quality_issues: list[QualityIssue]
     ) -> tuple[ReviewResult, list[QualityIssue]]:
         return review, quality_issues
+
+    def review_diagnostic_fields(self, section_title: str, content: str) -> dict[str, Any]:
+        return {
+            "proposal_profile": False,
+            "reviewer_mode": "academic_review",
+            "missing_core_tasks": [],
+        }
 
     def outline_section_issues(
         self, section: SectionOutline, *, is_last: bool
