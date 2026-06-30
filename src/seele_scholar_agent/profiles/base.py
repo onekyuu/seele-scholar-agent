@@ -46,6 +46,10 @@ class DocumentProfile(Protocol):
 
     def missing_core_tasks(self, section_title: str, content: str) -> list[str]: ...
 
+    def should_defer_claim(
+        self, claim_text: str, citation_numbers: tuple[int, ...], section_title: str
+    ) -> bool: ...
+
     def empty_reference_issue(self) -> QualityIssue | None: ...
 
     def structural_review_issues(
@@ -102,6 +106,11 @@ class DefaultDocumentProfile:
 
     def missing_core_tasks(self, section_title: str, content: str) -> list[str]:
         return []
+
+    def should_defer_claim(
+        self, claim_text: str, citation_numbers: tuple[int, ...], section_title: str
+    ) -> bool:
+        return False
 
     def empty_reference_issue(self) -> QualityIssue | None:
         return None

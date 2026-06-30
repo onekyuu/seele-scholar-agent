@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from ..document_profile import (
+    is_proposal_plan_sentence,
     is_schedule_section,
     missing_proposal_core_tasks,
     missing_schedule_phases,
@@ -208,6 +209,11 @@ class ResearchProposalProfile:
 
     def missing_core_tasks(self, section_title: str, content: str) -> list[str]:
         return missing_proposal_core_tasks(section_title, content)
+
+    def should_defer_claim(
+        self, claim_text: str, citation_numbers: tuple[int, ...], section_title: str
+    ) -> bool:
+        return not citation_numbers and is_proposal_plan_sentence(claim_text, section_title)
 
     def empty_reference_issue(self) -> QualityIssue | None:
         return QualityIssue(

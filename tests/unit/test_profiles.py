@@ -47,6 +47,21 @@ def test_research_proposal_profile_flags_missing_core_tasks():
     assert "PROPOSAL_CORE_TASK_MISSING" in {issue.code for issue in quality_issues}
 
 
+def test_research_proposal_profile_defers_plan_claim_without_citation():
+    profile = ResearchProposalProfile()
+
+    assert profile.should_defer_claim(
+        "1年次後期にプロトタイプを実装し、評価手法を検証する。",
+        (),
+        "研究計画・スケジュール",
+    )
+    assert not profile.should_defer_claim(
+        "先行研究は音響設計の重要性を示している。",
+        (),
+        "研究背景",
+    )
+
+
 def test_research_proposal_profile_applies_review_policy():
     profile = ResearchProposalProfile()
     review = ReviewResult(
