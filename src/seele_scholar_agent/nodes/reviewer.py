@@ -13,7 +13,6 @@ from ..config import settings
 from ..document_profile import (
     is_compound_section_title,
     is_proposal_plan_sentence,
-    is_research_proposal,
     missing_proposal_core_tasks,
 )
 from ..i18n import t
@@ -105,8 +104,8 @@ class ReviewerNode:
             return {"status": "failed", "error_message": "Review index out of bounds"}
 
         section = sections[index]
-        proposal_profile = is_research_proposal(state)
         document_profile = get_document_profile(state)
+        proposal_profile = document_profile.uses_specialized_review_policy
 
         logger.info("reviewing section", title=section.title)
 
@@ -265,8 +264,8 @@ class ReviewerNode:
             return
 
         section = sections[index]
-        proposal_profile = is_research_proposal(state)
         document_profile = get_document_profile(state)
+        proposal_profile = document_profile.uses_specialized_review_policy
         yield NodeStreamEvent(type="progress", progress=f"reviewing:{section.title}")
 
         input_data = {

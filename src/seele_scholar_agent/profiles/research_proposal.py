@@ -146,6 +146,7 @@ class ResearchProposalProfile:
     uses_profile_outline_quality = True
     uses_strict_academic_integrity = False
     review_document_type = RESEARCH_PROPOSAL_PROFILE_NAME
+    uses_specialized_review_policy = True
 
     def effective_paper_type(self, requested: str) -> str:
         return RESEARCH_PROPOSAL_PROFILE_NAME if requested == "auto" else requested

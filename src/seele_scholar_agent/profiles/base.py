@@ -24,6 +24,7 @@ class DocumentProfile(Protocol):
     uses_profile_outline_quality: bool
     uses_strict_academic_integrity: bool
     review_document_type: str
+    uses_specialized_review_policy: bool
 
     def effective_paper_type(self, requested: str) -> str: ...
 
@@ -71,6 +72,7 @@ class DefaultDocumentProfile:
     uses_profile_outline_quality = False
     uses_strict_academic_integrity = True
     review_document_type = "academic_paper"
+    uses_specialized_review_policy = False
 
     def effective_paper_type(self, requested: str) -> str:
         return requested
