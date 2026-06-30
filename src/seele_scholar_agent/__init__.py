@@ -53,7 +53,7 @@ from .state import (
 from .style_packs import LocaleStylePack, StyleReference
 from .writing import OutlineContext, SectionBrief, SectionWritingSpec, WriterInput
 
-__version__ = "0.12.5"
+__version__ = "0.13.0"
 
 __all__ = [
     "create_writing_graph",
