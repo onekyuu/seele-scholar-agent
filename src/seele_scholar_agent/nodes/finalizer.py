@@ -5,9 +5,9 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from ..agent_config import PromptsConfig
-from ..document_profile import is_research_proposal
 from ..i18n import t
 from ..logging import get_logger
+from ..profiles import get_document_profile
 from ..state import AgentState, SectionDraft
 from . import NodeStreamEvent, _stream_llm_text, invoke_with_retry
 
@@ -57,7 +57,7 @@ class FinalizerNode:
         sections = state.get("sections", [])
         lang = state.get("language", "zh")
         topic = state["topic"]
-        if is_research_proposal(state):
+        if get_document_profile(state).skip_auto_finalizer:
             return {"status": "completed"}
 
         completed_summary = _build_completed_sections_summary(sections)
@@ -111,7 +111,7 @@ class FinalizerNode:
         sections = state.get("sections", [])
         lang = state.get("language", "zh")
         topic = state["topic"]
-        if is_research_proposal(state):
+        if get_document_profile(state).skip_auto_finalizer:
             yield NodeStreamEvent(type="result", result={"status": "completed"})
             return
 

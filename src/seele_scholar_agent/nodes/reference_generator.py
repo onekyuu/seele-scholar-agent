@@ -4,8 +4,8 @@ from collections.abc import AsyncIterator
 from typing import Any, Literal
 
 from ..citation import CitationSource
-from ..document_profile import is_research_proposal
 from ..logging import get_logger
+from ..profiles import get_document_profile
 from ..state import AgentState, PaperMetadata, QualityIssue, ReferenceEntry
 from ..tools.crossref import CrossRefMetadata, extract_doi_from_url, fetch_metadata
 from . import CITATION_PATTERN, NodeStreamEvent
@@ -79,21 +79,12 @@ class ReferenceGeneratorNode:
         cited_numbers = _collect_cited_numbers([s.content for s in sections if s.content])
         if not cited_numbers:
             logger.warning("no inline citations found; refusing to generate full references")
-            if is_research_proposal(state):
-                quality_issue = QualityIssue(
-                    code="PROPOSAL_NO_INLINE_CITATIONS",
-                    message=(
-                        "No inline citations were found. For research proposals this is "
-                        "allowed, but prior-work/background sections should cite sources "
-                        "when they make literature claims."
-                    ),
-                    severity="warning",
-                    location="references",
-                    blocking=False,
-                )
+            document_profile = get_document_profile(state)
+            if document_profile.allow_empty_references:
+                quality_issue = document_profile.empty_reference_issue()
                 return {
                     "references": [],
-                    "quality_issues": [quality_issue],
+                    "quality_issues": [quality_issue] if quality_issue is not None else [],
                     "status": "completed",
                 }
             quality_issue = QualityIssue(

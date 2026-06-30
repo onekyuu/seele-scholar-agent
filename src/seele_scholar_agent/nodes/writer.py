@@ -10,14 +10,19 @@ from ..agent_config import PromptsConfig, RAGRetrieverFunc
 from ..config import settings
 from ..document_profile import (
     is_compound_section_title,
-    is_research_proposal,
     is_schedule_section,
-    missing_proposal_core_tasks,
 )
 from ..draft.mapping import intent_instruction
 from ..i18n import t
 from ..logging import get_logger
 from ..policy import SectionExecutionStrategy
+from ..profiles import (
+    DEFAULT_PROFILE_NAME,
+    PROFILE_DRAFT_MODE,
+    PROFILE_REVISION_MODE,
+    get_default_specialized_writer_prompts,
+    get_document_profile,
+)
 from ..state import (
     AgentState,
     ClaimEvidenceBinding,
@@ -51,99 +56,6 @@ _BUDGET_RE = re.compile(
     r"(\d+\s*(?:-\s*\d+\s*)?(?:字|文字|語|words?)|全文|预算|予算|budget|target_words|字数|字數)",
     re.IGNORECASE,
 )
-
-_PROPOSAL_REVISION_USER_PROMPT = """研究主题：{topic}
-
-目标语言：{language}
-
-当前章节：{section_title}
-章节描述与长度约束：
-{section_description}
-
-论文/计划书大纲：
-{outline_json}
-
-已完成章节摘要（用于保持前后连贯，避免重复）：
-{previous_sections}
-
-当前版本正文（必须在此基础上返修，不要自由重写成无关版本）：
-{current_content}
-
-审稿意见（优先处理 blocking；warning 可用压缩、弱化断言或删去不必要引用解决）：
-{review_comments}
-
-可引用论文列表（引用时只能使用以下编号，格式为 [N]）：
-{numbered_papers}
-
-相关文献证据包：
-{rag_context}
-
-语言与文体指导：
-{style_guidance}
-
-请为 research_proposal（日本大学院研究計画書）输出该章节的完整替换正文，不要输出章节标题。
-
-返修要求：
-1. 优先修复 blocking issue：缺少标题核心任务、结构断裂、数字枚举不一致、内容截断、
-   目的/方法/计划无法判断可行性。不要机械扩写所有 reviewer comments。
-2. 保留章节在预算内的完整结构；若篇幅紧张，压缩背景和铺垫，优先保留研究主题、
-   目的、方法可行性和计划。
-3. 申请者自己的研究计划、时间安排、拟开展实验和执行安排不需要强行加引用；
-   引用只用于文献事实或已有研究结论。
-4. 对非阻塞 missing_citation、citation_mismatch、unsupported claim，可通过弱化断言、
-   删除不必要引用、改为更谨慎表达解决，不要为了补引用而越写越长。
-5. 「研究方法」只需概要说明使用什么资料/工具/方法、如何验证或分析、为什么硕士阶段
-   可行；不要求完整实验 protocol、详细变量设计、统计检验细节。
-6. 「期待される成果」只需说明 1-2 个预期贡献或申请价值，不要写成论文 contribution
-   section。
-7. 避免模板式声明“三点”“三段階”，除非正文实际写出对应数量。
-8. 若本章节是明确的「研究計画・スケジュール」或 schedule/timeline 章节，必须覆盖
-   1年次前期、1年次後期、2年次前期、2年次後期。每个阶段至少写出具体任务
-   和交付物/里程碑；即使预算很紧，也不允许省略 2 年次。
-9. 直接输出正文，不要解释修改过程，不要使用 # 或 ## 标题符号。"""
-
-_PROPOSAL_DRAFT_USER_PROMPT = """研究主题：{topic}
-
-目标语言：{language}
-
-当前章节：{section_title}
-章节描述与长度约束：
-{section_description}
-
-研究计划书大纲：
-{outline_json}
-
-已完成章节摘要（供上下文参考，避免重复）：
-{previous_sections}
-
-可引用论文列表（引用时只能使用以下编号，格式为 [N]）：
-{numbered_papers}
-
-相关文献证据包：
-{rag_context}
-
-语言与文体指导：
-{style_guidance}
-
-请为 research_proposal（日本大学院研究計画書）撰写该章节正文，不要输出章节标题。
-
-写作要求：
-1. 按申请材料而非学术论文正文写作，突出研究动机、研究目的、研究方法、
-   可行性、计划性和申请者自身的问题意识。面向教授快速判断选题价值与可行性。
-2. 申请者自己的计划、拟开展实验、时间安排、交付物和将来展望不需要引用。
-   引用只用于先行研究、背景事实或已有研究结论。
-3. 遵守章节描述和 outline 中的 target_words/总字数预算；篇幅紧张时压缩背景，
-   优先保留研究主题、目的、方法可行性和计划，不要省略章节核心任务。
-4. 「研究方法」只需概要级说明：使用什么资料/工具/方法，如何验证或分析，为什么
-   硕士阶段可行。不要求完整实验 protocol、详细变量设计或统计检验细节。
-5. 「期待される成果」只需说明 1-2 个预期贡献或申请价值，不要求完整论文式
-   contribution section。
-6. 复合标题只需让两侧都有概要级信息，不要把每一侧扩写成完整论文小节。
-7. 避免模板式声明“三点”“三段階”，除非实际写出对应数量。
-8. 若本章节是明确的「研究計画・スケジュール」或 schedule/timeline 章节，必须覆盖
-   1年次前期、1年次後期、2年次前期、2年次後期。每个阶段至少写出具体任务
-   和交付物/里程碑。
-9. 直接输出正文，不要解释写作过程，不要使用 # 或 ## 标题符号。"""
 
 _ACADEMIC_REVISION_USER_PROMPT = """论文主题：{topic}
 
@@ -434,16 +346,17 @@ class WriterNode:
         self.prompt = ChatPromptTemplate.from_messages(
             [("system", prompts.writer_system_prompt), ("user", prompts.writer_user_prompt)]
         )
-        self.proposal_revision_prompt = ChatPromptTemplate.from_messages(
+        specialized_prompts = get_default_specialized_writer_prompts(prompts)
+        self.profile_revision_prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", prompts.writer_system_prompt),
-                ("user", prompts.proposal_revision_user_prompt or _PROPOSAL_REVISION_USER_PROMPT),
+                ("user", specialized_prompts.revision_user_prompt),
             ]
         )
-        self.proposal_draft_prompt = ChatPromptTemplate.from_messages(
+        self.profile_draft_prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", prompts.writer_system_prompt),
-                ("user", prompts.proposal_writer_user_prompt or _PROPOSAL_DRAFT_USER_PROMPT),
+                ("user", specialized_prompts.draft_user_prompt),
             ]
         )
         self.academic_revision_prompt = ChatPromptTemplate.from_messages(
@@ -453,12 +366,12 @@ class WriterNode:
             ]
         )
         self.chain = self.prompt | self.llm
-        self.proposal_draft_chain = self.proposal_draft_prompt | self.llm
-        self.proposal_revision_chain = self.proposal_revision_prompt | self.llm
+        self.profile_draft_chain = self.profile_draft_prompt | self.llm
+        self.profile_revision_chain = self.profile_revision_prompt | self.llm
         self.academic_revision_chain = self.academic_revision_prompt | self.llm
         self.draft_writer = DraftWriter(self.chain)
-        self.proposal_draft_writer = DraftWriter(self.proposal_draft_chain)
-        self.proposal_revision_writer = DraftWriter(self.proposal_revision_chain)
+        self.profile_draft_writer = DraftWriter(self.profile_draft_chain)
+        self.profile_revision_writer = DraftWriter(self.profile_revision_chain)
         self.academic_revision_writer = DraftWriter(self.academic_revision_chain)
         self.citation_binder = CitationBinder()
         self.style_polisher = StylePolisher()
@@ -481,7 +394,8 @@ class WriterNode:
             }
 
         section = sections[current_index]
-        proposal_profile = is_research_proposal(state)
+        document_profile = get_document_profile(state)
+        specialized_profile = document_profile.name != DEFAULT_PROFILE_NAME
         writer_mode = self._writer_mode(state, section)
         revision_mode = self._has_revision_context(section)
 
@@ -563,7 +477,8 @@ class WriterNode:
             "writer_diagnostics": {
                 "revision_mode": revision_mode,
                 "writer_mode": writer_mode,
-                "proposal_profile": proposal_profile,
+                "profile_name": document_profile.name,
+                "proposal_profile": specialized_profile,
                 "section_title": section.title,
                 "section_budget": self._budget_diagnostic_value(
                     writer_input.current_section
@@ -572,10 +487,8 @@ class WriterNode:
                     writer_input.current_section
                 ),
                 "compound_title_detected": is_compound_section_title(section.title),
-                "missing_core_tasks": (
-                    missing_proposal_core_tasks(section.title, content)
-                    if proposal_profile
-                    else []
+                "missing_core_tasks": document_profile.missing_core_tasks(
+                    section.title, content
                 ),
                 "review_comment_count": len(section.review_comments),
                 "schedule_section": is_schedule_section(section.title),
@@ -605,7 +518,8 @@ class WriterNode:
             return
 
         section = sections[current_index]
-        proposal_profile = is_research_proposal(state)
+        document_profile = get_document_profile(state)
+        specialized_profile = document_profile.name != DEFAULT_PROFILE_NAME
         writer_mode = self._writer_mode(state, section)
         revision_mode = self._has_revision_context(section)
 
@@ -687,7 +601,8 @@ class WriterNode:
             "writer_diagnostics": {
                 "revision_mode": revision_mode,
                 "writer_mode": writer_mode,
-                "proposal_profile": proposal_profile,
+                "profile_name": document_profile.name,
+                "proposal_profile": specialized_profile,
                 "section_title": section.title,
                 "section_budget": self._budget_diagnostic_value(
                     writer_input.current_section
@@ -696,10 +611,8 @@ class WriterNode:
                     writer_input.current_section
                 ),
                 "compound_title_detected": is_compound_section_title(section.title),
-                "missing_core_tasks": (
-                    missing_proposal_core_tasks(section.title, content)
-                    if proposal_profile
-                    else []
+                "missing_core_tasks": document_profile.missing_core_tasks(
+                    section.title, content
                 ),
                 "review_comment_count": len(section.review_comments),
                 "schedule_section": is_schedule_section(section.title),
@@ -1117,29 +1030,23 @@ class WriterNode:
 
     def _writer_mode(
         self, state: AgentState, section: SectionDraft
-    ) -> Literal["draft", "academic_revision", "proposal_draft", "proposal_revision"]:
-        if is_research_proposal(state):
-            if self._has_revision_context(section):
-                return "proposal_revision"
-            return "proposal_draft"
-        if not self._has_revision_context(section):
-            return "draft"
-        return "academic_revision"
+    ) -> Literal["draft", "academic_revision", "profile_draft", "profile_revision"]:
+        return get_document_profile(state).writer_mode(self._has_revision_context(section))
 
     def _draft_writer_for_mode(self, mode: str) -> DraftWriter:
-        if mode == "proposal_revision":
-            return self.proposal_revision_writer
-        if mode == "proposal_draft":
-            return self.proposal_draft_writer
+        if mode == PROFILE_REVISION_MODE:
+            return self.profile_revision_writer
+        if mode == PROFILE_DRAFT_MODE:
+            return self.profile_draft_writer
         if mode == "academic_revision":
             return self.academic_revision_writer
         return self.draft_writer
 
     def _stream_chain_for_mode(self, mode: str) -> Any:
-        if mode == "proposal_revision":
-            return self.proposal_revision_chain
-        if mode == "proposal_draft":
-            return self.proposal_draft_chain
+        if mode == PROFILE_REVISION_MODE:
+            return self.profile_revision_chain
+        if mode == PROFILE_DRAFT_MODE:
+            return self.profile_draft_chain
         if mode == "academic_revision":
             return self.academic_revision_chain
         return self.chain
