@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from ..document_profile import is_research_proposal
-from ..state import OutlineStructure, QualityIssue
+from ..state import OutlineStructure, QualityIssue, SectionOutline
 
 WriterMode = Literal["draft", "academic_revision", "profile_draft", "profile_revision"]
 DEFAULT_PROFILE_NAME = "default"
@@ -21,6 +21,7 @@ class DocumentProfile(Protocol):
     name: str
     allow_empty_references: bool
     skip_auto_finalizer: bool
+    uses_profile_outline_quality: bool
 
     def effective_paper_type(self, requested: str) -> str: ...
 
@@ -42,11 +43,18 @@ class DocumentProfile(Protocol):
 
     def empty_reference_issue(self) -> QualityIssue | None: ...
 
+    def outline_section_issues(
+        self, section: SectionOutline, *, is_last: bool
+    ) -> list[QualityIssue]: ...
+
+    def outline_structure_issues(self, outline: OutlineStructure) -> list[QualityIssue]: ...
+
 
 class DefaultDocumentProfile:
     name = DEFAULT_PROFILE_NAME
     allow_empty_references = False
     skip_auto_finalizer = False
+    uses_profile_outline_quality = False
 
     def effective_paper_type(self, requested: str) -> str:
         return requested
@@ -76,6 +84,14 @@ class DefaultDocumentProfile:
 
     def empty_reference_issue(self) -> QualityIssue | None:
         return None
+
+    def outline_section_issues(
+        self, section: SectionOutline, *, is_last: bool
+    ) -> list[QualityIssue]:
+        return []
+
+    def outline_structure_issues(self, outline: OutlineStructure) -> list[QualityIssue]:
+        return []
 
 
 def get_document_profile(state: Mapping[str, Any]) -> DocumentProfile:

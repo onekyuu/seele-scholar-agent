@@ -1,6 +1,10 @@
 from typing import Any
 
-from ..document_profile import missing_proposal_core_tasks
+from ..document_profile import (
+    is_schedule_section,
+    missing_proposal_core_tasks,
+    missing_schedule_phases,
+)
 from ..state import (
     OutlineStructure,
     QualityIssue,
@@ -114,6 +118,7 @@ class ResearchProposalProfile:
     name = RESEARCH_PROPOSAL_PROFILE_NAME
     allow_empty_references = True
     skip_auto_finalizer = True
+    uses_profile_outline_quality = True
 
     def effective_paper_type(self, requested: str) -> str:
         return RESEARCH_PROPOSAL_PROFILE_NAME if requested == "auto" else requested
@@ -177,6 +182,100 @@ class ResearchProposalProfile:
             location="references",
             blocking=False,
         )
+
+    def outline_section_issues(
+        self, section: SectionOutline, *, is_last: bool
+    ) -> list[QualityIssue]:
+        issues: list[QualityIssue] = []
+        location = f"outline.sections.{section.order}"
+        if not section.purpose.strip():
+            issues.append(
+                _blocking_issue(
+                    "OUTLINE_MISSING_PURPOSE",
+                    f"Section '{section.title}' is missing purpose.",
+                    location,
+                )
+            )
+        if not is_last and not section.transition_to_next.strip():
+            issues.append(
+                QualityIssue(
+                    code="OUTLINE_MISSING_TRANSITION",
+                    message=f"Section '{section.title}' is missing transition_to_next.",
+                    severity="warning",
+                    location=location,
+                    blocking=False,
+                )
+            )
+        if section.target_words is None:
+            issues.append(
+                QualityIssue(
+                    code="OUTLINE_MISSING_TARGET_WORDS",
+                    message=f"Section '{section.title}' has no proposal length budget.",
+                    severity="warning",
+                    location=location,
+                    blocking=False,
+                )
+            )
+        return issues
+
+    def outline_structure_issues(self, outline: OutlineStructure) -> list[QualityIssue]:
+        issues: list[QualityIssue] = []
+        sections = sorted(outline.sections, key=lambda item: item.order)
+        if len(sections) < 4 or len(sections) > 5:
+            issues.append(
+                QualityIssue(
+                    code="PROPOSAL_SECTION_COUNT_OUT_OF_RANGE",
+                    message="Research proposal outline should usually have 4-5 sections.",
+                    severity="warning",
+                    location="outline.sections",
+                    blocking=False,
+                    details={"section_count": len(sections)},
+                )
+            )
+
+        schedule_sections = [section for section in sections if is_schedule_section(section.title)]
+        plan_sections = [
+            section
+            for section in sections
+            if "計画" in section.title or "plan" in section.title.casefold()
+        ]
+        if not schedule_sections and not plan_sections:
+            issues.append(
+                QualityIssue(
+                    code="PROPOSAL_PLAN_SECTION_MISSING",
+                    message=(
+                        "Research proposal outline should include method/plan or "
+                        "schedule information for feasibility review."
+                    ),
+                    severity="warning",
+                    location="outline.sections",
+                    blocking=False,
+                )
+            )
+            return issues
+        if not schedule_sections:
+            return issues
+
+        schedule = schedule_sections[0]
+        schedule_text = "\n".join(
+            [
+                schedule.title,
+                schedule.description,
+                schedule.content_summary,
+                " ".join(schedule.key_points),
+            ]
+        )
+        missing = missing_schedule_phases(schedule_text)
+        if missing:
+            issues.append(
+                _blocking_issue(
+                    "PROPOSAL_SCHEDULE_PHASES_MISSING",
+                    "Schedule outline is missing phases: " + ", ".join(missing),
+                    f"outline.sections.{schedule.order}",
+                    details={"missing_phases": missing},
+                )
+            )
+        return issues
 
 
 def default_proposal_outline(topic: str) -> dict[str, Any]:
@@ -364,3 +463,20 @@ def _with_proposal_description_guard(section: SectionOutline) -> SectionOutline:
     if "概要級" in section.description or "overview-level" in section.description:
         return section
     return section.model_copy(update={"description": section.description + guard})
+
+
+def _blocking_issue(
+    code: str,
+    message: str,
+    location: str,
+    *,
+    details: dict[str, Any] | None = None,
+) -> QualityIssue:
+    return QualityIssue(
+        code=code,
+        message=message,
+        severity="blocking",
+        location=location,
+        blocking=True,
+        details=details or {},
+    )
