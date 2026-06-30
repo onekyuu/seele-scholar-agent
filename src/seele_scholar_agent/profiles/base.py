@@ -23,6 +23,7 @@ class DocumentProfile(Protocol):
     skip_auto_finalizer: bool
     uses_profile_outline_quality: bool
     uses_strict_academic_integrity: bool
+    review_document_type: str
 
     def effective_paper_type(self, requested: str) -> str: ...
 
@@ -39,6 +40,8 @@ class DocumentProfile(Protocol):
     def writer_mode(self, has_revision_context: bool) -> WriterMode: ...
 
     def writer_prompts(self, prompts: Any) -> ProfileWriterPrompts | None: ...
+
+    def review_policy_text(self) -> str: ...
 
     def missing_core_tasks(self, section_title: str, content: str) -> list[str]: ...
 
@@ -59,6 +62,7 @@ class DefaultDocumentProfile:
     skip_auto_finalizer = False
     uses_profile_outline_quality = False
     uses_strict_academic_integrity = True
+    review_document_type = "academic_paper"
 
     def effective_paper_type(self, requested: str) -> str:
         return requested
@@ -82,6 +86,9 @@ class DefaultDocumentProfile:
 
     def writer_prompts(self, prompts: Any) -> ProfileWriterPrompts | None:
         return None
+
+    def review_policy_text(self) -> str:
+        return "Review as an academic paper section."
 
     def missing_core_tasks(self, section_title: str, content: str) -> list[str]:
         return []
