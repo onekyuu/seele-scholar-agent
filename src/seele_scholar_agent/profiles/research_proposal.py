@@ -8,6 +8,7 @@ from ..document_profile import (
 from ..state import (
     OutlineStructure,
     QualityIssue,
+    ReviewIssue,
     SectionEvidencePlan,
     SectionOutline,
 )
@@ -217,6 +218,44 @@ class ResearchProposalProfile:
             location="references",
             blocking=False,
         )
+
+    def structural_review_issues(
+        self, section_id: str, section_title: str, content: str
+    ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
+        if not is_schedule_section(section_title):
+            return [], []
+
+        missing = missing_schedule_phases(content)
+        if not missing:
+            return [], []
+
+        issue = ReviewIssue(
+            type="format_issue",
+            description=(
+                "Research proposal schedule is incomplete; missing phases: "
+                + ", ".join(missing)
+            ),
+            suggestion=(
+                "Revise the schedule to cover 1年次前期, 1年次後期, 2年次前期, "
+                "and 2年次後期, with tasks and deliverables for each phase."
+            ),
+            location=section_title,
+            blocking=True,
+            category="blocking",
+        )
+        quality_issue = QualityIssue(
+            code="PROPOSAL_SCHEDULE_PHASES_MISSING",
+            message=issue.description,
+            severity="blocking",
+            location=section_title,
+            blocking=True,
+            details={
+                "section_id": section_id,
+                "audit_source": "structural",
+                "missing_phases": missing,
+            },
+        )
+        return [issue], [quality_issue]
 
     def outline_section_issues(
         self, section: SectionOutline, *, is_last: bool
