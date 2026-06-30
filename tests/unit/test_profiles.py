@@ -2,7 +2,7 @@ from seele_scholar_agent.profiles import (
     DefaultDocumentProfile,
     ResearchProposalProfile,
 )
-from seele_scholar_agent.state import ReviewIssue, ReviewResult
+from seele_scholar_agent.state import QualityIssue, ReviewIssue, ReviewResult
 
 
 def test_default_profile_review_input_policy():
@@ -16,6 +16,9 @@ def test_default_profile_review_input_policy():
         "reviewer_mode": "academic_review",
         "missing_core_tasks": [],
     }
+    assert profile.citation_alignment_uses_cited_context() is False
+    assert profile.citation_review_category() == "content_quality"
+    assert profile.should_emit_claim_source_review_issue("unsupported_binding") is True
 
 
 def test_research_proposal_profile_review_input_policy():
@@ -24,6 +27,9 @@ def test_research_proposal_profile_review_input_policy():
     assert profile.review_document_type == "research_proposal"
     assert profile.uses_specialized_review_policy is True
     assert "Japanese graduate-school research proposal" in profile.review_policy_text()
+    assert profile.citation_alignment_uses_cited_context() is True
+    assert profile.citation_review_category() == "citation_warning"
+    assert profile.should_emit_claim_source_review_issue("unsupported_binding") is False
 
 
 def test_research_proposal_profile_flags_incomplete_schedule():
@@ -70,6 +76,28 @@ def test_research_proposal_profile_defers_plan_claim_without_citation():
         (),
         "研究背景",
     )
+
+
+def test_research_proposal_profile_defers_claim_quality_issue():
+    profile = ResearchProposalProfile()
+    issue = QualityIssue(
+        code="UNSUPPORTED_CLAIM",
+        message="Missing support.",
+        severity="error",
+        location="sentence",
+        details={"section_id": "section-1", "audit_source": "claim_source"},
+    )
+
+    updated = profile.claim_source_quality_issue(
+        issue,
+        audit_source="evidence_binding",
+        binding_diagnostics={"candidate_count": 0},
+    )
+
+    assert updated.severity == "warning"
+    assert updated.details["audit_source"] == "evidence_binding"
+    assert updated.details["deferred"] is True
+    assert updated.details["binding_diagnostics"] == {"candidate_count": 0}
 
 
 def test_research_proposal_profile_applies_review_policy():
