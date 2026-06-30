@@ -14,9 +14,7 @@ from ..document_profile import (
     is_compound_section_title,
     is_proposal_plan_sentence,
     is_research_proposal,
-    is_schedule_section,
     missing_proposal_core_tasks,
-    missing_schedule_phases,
 )
 from ..i18n import t
 from ..logging import get_logger
@@ -206,15 +204,16 @@ class ReviewerNode:
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
-        if proposal_profile:
-            schedule_issues, schedule_quality_issues = self._audit_proposal_schedule(
+        structural_issues, structural_quality_issues = (
+            document_profile.structural_review_issues(
                 section.section_id, section.title, section.content
             )
-            quality_issues = [*quality_issues, *schedule_quality_issues]
-            if schedule_issues:
-                review.issues.extend(schedule_issues)
-                if review.approved:
-                    review = review.model_copy(update={"approved": False})
+        )
+        quality_issues = [*quality_issues, *structural_quality_issues]
+        if structural_issues:
+            review.issues.extend(structural_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
 
         if proposal_profile:
             review, quality_issues = self._apply_proposal_review_policy(
@@ -370,15 +369,16 @@ class ReviewerNode:
             if review.approved:
                 review = review.model_copy(update={"approved": False})
 
-        if proposal_profile:
-            schedule_issues, schedule_quality_issues = self._audit_proposal_schedule(
+        structural_issues, structural_quality_issues = (
+            document_profile.structural_review_issues(
                 section.section_id, section.title, section.content
             )
-            quality_issues = [*quality_issues, *schedule_quality_issues]
-            if schedule_issues:
-                review.issues.extend(schedule_issues)
-                if review.approved:
-                    review = review.model_copy(update={"approved": False})
+        )
+        quality_issues = [*quality_issues, *structural_quality_issues]
+        if structural_issues:
+            review.issues.extend(structural_issues)
+            if review.approved:
+                review = review.model_copy(update={"approved": False})
 
         if proposal_profile:
             review, quality_issues = self._apply_proposal_review_policy(
@@ -839,44 +839,6 @@ class ReviewerNode:
                 "audit_source": "claim_source",
             },
         )
-
-    def _audit_proposal_schedule(
-        self, section_id: str, section_title: str, content: str
-    ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
-        if not is_schedule_section(section_title):
-            return [], []
-
-        missing = missing_schedule_phases(content)
-        if not missing:
-            return [], []
-
-        issue = ReviewIssue(
-            type="format_issue",
-            description=(
-                "Research proposal schedule is incomplete; missing phases: "
-                + ", ".join(missing)
-            ),
-            suggestion=(
-                "Revise the schedule to cover 1年次前期, 1年次後期, 2年次前期, "
-                "and 2年次後期, with tasks and deliverables for each phase."
-            ),
-            location=section_title,
-            blocking=True,
-            category="blocking",
-        )
-        quality_issue = QualityIssue(
-            code="PROPOSAL_SCHEDULE_PHASES_MISSING",
-            message=issue.description,
-            severity="blocking",
-            location=section_title,
-            blocking=True,
-            details={
-                "section_id": section_id,
-                "audit_source": "structural",
-                "missing_phases": missing,
-            },
-        )
-        return [issue], [quality_issue]
 
     def _apply_proposal_review_policy(
         self,
