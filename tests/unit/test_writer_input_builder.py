@@ -1,4 +1,10 @@
 from seele_scholar_agent.budget import BudgetState, SectionBudget
+from seele_scholar_agent.draft import (
+    DraftIntegrationNode,
+    DraftSegment,
+    ExistingContentRef,
+    PreservePolicy,
+)
 from seele_scholar_agent.exemplar import ExemplarContext
 from seele_scholar_agent.writing import WriterInputBuilder
 
@@ -61,3 +67,35 @@ def test_writer_input_builder_injects_exemplar_context(state_with_outline):
     )
 
     assert writer_input.exemplar_context == exemplar_context
+
+
+def test_writer_input_builder_injects_draft_context(state_with_outline):
+    existing_content = ExistingContentRef(
+        draft_id="draft-1",
+        version_id="v1",
+        segments=[
+            DraftSegment(
+                segment_id="seg-intro",
+                detected_heading="Introduction",
+                text="Draft introduction content to preserve and expand.",
+                order=1,
+            )
+        ],
+        preserve_policy=PreservePolicy(protected_segment_ids=["seg-intro"]),
+        user_intent="expand",
+    )
+    draft_state = DraftIntegrationNode().integrate(
+        {**state_with_outline, "existing_content": existing_content}
+    )["draft_integration"]
+    state = {**state_with_outline, "draft_integration": draft_state}
+
+    writer_input = WriterInputBuilder().build(
+        state,
+        current_index=0,
+        evidence_packets=[],
+        style_context="",
+    )
+
+    assert writer_input.draft_context is not None
+    assert writer_input.draft_context.mapped_segments[0].segment_id == "seg-intro"
+    assert writer_input.draft_context.preserve_policy.protected_segment_ids == ["seg-intro"]

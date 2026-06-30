@@ -4,6 +4,12 @@ from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from seele_scholar_agent.draft import (
+    DraftIntegrationNode,
+    DraftSegment,
+    ExistingContentRef,
+    PreservePolicy,
+)
 from seele_scholar_agent.nodes.planner import PlannerNode
 from seele_scholar_agent.state import AgentState, PaperMetadata
 
@@ -30,6 +36,44 @@ def _make_llm_result(
         "sections": sections,
         "keywords": keywords or ["test"],
     }
+
+
+@pytest.mark.asyncio
+async def test_planner_includes_draft_integration_context(
+    mock_llm, mock_prompts, state_with_papers
+):
+    captured_input: dict = {}
+
+    async def capture_invoke(chain, input_data):  # type: ignore[override]
+        captured_input.update(input_data)
+        return _make_llm_result()
+
+    existing_content = ExistingContentRef(
+        draft_id="draft-1",
+        version_id="v1",
+        segments=[
+            DraftSegment(
+                segment_id="seg-background",
+                detected_heading="Background",
+                text="A user-provided background paragraph.",
+                order=1,
+            )
+        ],
+        preserve_policy=PreservePolicy(),
+        user_intent="rewrite",
+    )
+    draft_state = DraftIntegrationNode().integrate(
+        {**state_with_papers, "existing_content": existing_content}
+    )["draft_integration"]
+    state = cast(AgentState, {**state_with_papers, "draft_integration": draft_state})
+
+    with patch("seele_scholar_agent.nodes.planner.invoke_with_retry", side_effect=capture_invoke):
+        node = PlannerNode(llm=mock_llm, prompts=mock_prompts)
+        await node.plan(state)
+
+    assert "Draft integration context" in captured_input["style_guidance"]
+    assert "Outline adaptation: create_outline_from_draft" in captured_input["style_guidance"]
+    assert "seg-background" in captured_input["style_guidance"]
 
 
 # ---------------------------------------------------------------------------

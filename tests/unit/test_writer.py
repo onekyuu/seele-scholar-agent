@@ -6,6 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
+from seele_scholar_agent.draft import (
+    DraftIntegrationNode,
+    DraftSegment,
+    ExistingContentRef,
+    PreservePolicy,
+)
 from seele_scholar_agent.exemplar import ExemplarChunk, ExemplarContext
 from seele_scholar_agent.nodes.writer import WriterNode
 from seele_scholar_agent.state import (
@@ -76,6 +82,46 @@ async def test_writer_adds_exemplar_context_to_style_guidance(
     assert "Open with motivation" in captured_input["style_guidance"]
     assert "intro-example" in captured_input["style_guidance"]
     assert "do not reuse wording" in captured_input["style_guidance"]
+
+
+@pytest.mark.asyncio
+async def test_writer_adds_draft_context_to_style_guidance(
+    mock_llm, mock_prompts, state_with_outline
+):
+    captured_input: dict = {}
+
+    async def capture_invoke(chain, input_data):  # type: ignore[override]
+        captured_input.update(input_data)
+        return AIMessage(content="Expanded draft introduction.")
+
+    existing_content = ExistingContentRef(
+        draft_id="draft-1",
+        version_id="v1",
+        segments=[
+            DraftSegment(
+                segment_id="seg-intro",
+                detected_heading="Introduction",
+                text="User draft introduction to expand.",
+                order=1,
+            )
+        ],
+        preserve_policy=PreservePolicy(protected_segment_ids=["seg-intro"]),
+        user_intent="expand",
+    )
+    draft_state = DraftIntegrationNode().integrate(
+        {**state_with_outline, "existing_content": existing_content}
+    )["draft_integration"]
+    state = cast(AgentState, {**state_with_outline, "draft_integration": draft_state})
+
+    with patch("seele_scholar_agent.nodes.writer.invoke_with_retry", side_effect=capture_invoke):
+        node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+        await node.write(state)
+
+    assert "Draft context" in captured_input["style_guidance"]
+    assert "User intent: expand" in captured_input["style_guidance"]
+    assert "seg-intro" in captured_input["style_guidance"]
+    assert "Preserve existing draft content" not in captured_input["style_guidance"]
+    assert "Preserve core draft content" in captured_input["style_guidance"]
 
 
 # ---------------------------------------------------------------------------

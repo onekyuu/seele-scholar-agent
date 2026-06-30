@@ -23,6 +23,7 @@ from .agent_config import (
 from .budget import BudgetAllocatorNode, BudgetPolicy, BudgetRevisionNode, LengthGateNode
 from .citation import CitationSourceGateNode
 from .config import settings
+from .draft import ConflictGate, CoverageGate, DraftIntegrationNode, PreservationGate
 from .exemplar import (
     ExemplarPlannerContextNode,
     ExemplarPolicy,
@@ -72,6 +73,9 @@ def create_writing_graph(
         if needs_budget_gate
         else "reviewer"
     )
+    post_draft_entry = (
+        "preservation_gate" if graph_config.enable_draft_integration else post_writer_entry
+    )
 
     topic_proposer = TopicProposerNode(llm=model, prompts=prompts)
     researcher = ResearcherNode(
@@ -82,6 +86,10 @@ def create_writing_graph(
         extra_paper_retrievers=extra_paper_retrievers,
     )
     citation_source_gate = CitationSourceGateNode()
+    draft_integration = DraftIntegrationNode()
+    preservation_gate = PreservationGate()
+    coverage_gate = CoverageGate()
+    conflict_gate = ConflictGate()
     exemplar_policy = ExemplarPolicy(enabled=graph_config.enable_exemplar_context)
     similarity_policy = ExemplarPolicy(enabled=graph_config.enable_similarity_gate)
     exemplar_planner_context = ExemplarPlannerContextNode(policy=exemplar_policy)
@@ -115,6 +123,7 @@ def create_writing_graph(
 
     graph.add_node("topic_proposer", topic_proposer.propose)
     graph.add_node("researcher", researcher.search)
+    graph.add_node("draft_integration", draft_integration.integrate)
     graph.add_node("citation_source_gate", citation_source_gate.build)
     graph.add_node("exemplar_planner_context", exemplar_planner_context.build)
     graph.add_node("exemplar_section_retriever", exemplar_section_retriever.retrieve)
@@ -122,6 +131,9 @@ def create_writing_graph(
     graph.add_node("planner", planner.plan)
     graph.add_node("outline_quality_gate", outline_quality_gate.check)
     graph.add_node("writer", writer.write)
+    graph.add_node("preservation_gate", preservation_gate.check)
+    graph.add_node("coverage_gate", coverage_gate.check)
+    graph.add_node("conflict_gate", conflict_gate.check)
     graph.add_node("length_gate", length_gate.check)
     graph.add_node("budget_reviser", budget_reviser.revise)
     graph.add_node("budget_allocator", budget_allocator_node.allocate)
@@ -132,13 +144,30 @@ def create_writing_graph(
     graph.add_node("integrity_gate", integrity_gate.check)
 
     if graph_config.generation_mode == GenerationMode.SINGLE_SECTION:
-        graph.add_edge(START, writer_entry)
+        if graph_config.enable_draft_integration:
+            graph.add_edge(START, "draft_integration")
+            graph.add_conditional_edges(
+                "draft_integration",
+                route_draft_integration,
+                {"continue": writer_entry, "end": END},
+            )
+        else:
+            graph.add_edge(START, writer_entry)
     elif not graph_config.enable_topic_proposer:
         graph.add_edge(START, "researcher")
     else:
         graph.add_edge(START, "topic_proposer")
         graph.add_edge("topic_proposer", "researcher")
-    graph.add_edge("researcher", "citation_source_gate")
+    if graph_config.generation_mode != GenerationMode.SINGLE_SECTION:
+        if graph_config.enable_draft_integration:
+            graph.add_edge("researcher", "draft_integration")
+            graph.add_conditional_edges(
+                "draft_integration",
+                route_draft_integration,
+                {"continue": "citation_source_gate", "end": END},
+            )
+        else:
+            graph.add_edge("researcher", "citation_source_gate")
     if graph_config.enable_exemplar_context:
         graph.add_edge("citation_source_gate", "exemplar_planner_context")
         graph.add_edge("exemplar_planner_context", "planner")
@@ -154,7 +183,11 @@ def create_writing_graph(
         )
     else:
         graph.add_edge("planner", writer_entry)
-    graph.add_edge("writer", post_writer_entry)
+    graph.add_edge("writer", post_draft_entry)
+    if graph_config.enable_draft_integration:
+        graph.add_edge("preservation_gate", "coverage_gate")
+        graph.add_edge("coverage_gate", "conflict_gate")
+        graph.add_edge("conflict_gate", post_writer_entry)
     if graph_config.enable_similarity_gate:
         graph.add_edge("similarity_gate", "length_gate" if needs_budget_gate else "reviewer")
     if needs_budget_gate:
@@ -301,6 +334,12 @@ def route_quality_gate(state: AgentState) -> Literal["writer", "end"]:
     if _has_blocking_quality_issues(state):
         return "end"
     return "writer"
+
+
+def route_draft_integration(state: AgentState) -> Literal["continue", "end"]:
+    if _has_blocking_quality_issues(state):
+        return "end"
+    return "continue"
 
 
 def route_length_gate(
