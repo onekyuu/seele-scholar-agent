@@ -11,10 +11,13 @@ from langchain_openai import ChatOpenAI
 from seele_scholar_agent import (
     BudgetPolicy,
     BudgetState,
+    DraftSegment,
     ExemplarChunk,
     ExemplarMaterial,
+    ExistingContentRef,
     GenerationMode,
     GraphConfig,
+    PreservePolicy,
     SectionBudget,
 )
 from seele_scholar_agent.graph import create_simple_writing_graph
@@ -333,6 +336,71 @@ async def test_graph_single_section_mode_stops_after_current_section(base_state,
     assert result["sections"][1].status == "pending"
     assert result["sections_completed"] == ["Introduction"]
     assert llm.ainvoke.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_graph_single_section_draft_context_reaches_writer(base_state, mock_prompts):
+    outline = OutlineStructure(
+        title="Existing Outline",
+        abstract="Abstract.",
+        sections=[
+            SectionOutline(
+                title="Introduction",
+                description="Intro",
+                order=1,
+            )
+        ],
+    )
+    sections = [
+        SectionDraft(
+            section_id="section_0",
+            title="Introduction",
+            description="Intro",
+            order_index=0,
+        )
+    ]
+    existing_content = ExistingContentRef(
+        draft_id="draft-1",
+        version_id="v1",
+        segments=[
+            DraftSegment(
+                segment_id="seg-intro",
+                detected_heading="Introduction",
+                text="Draft introduction content.",
+                order=1,
+            )
+        ],
+        preserve_policy=PreservePolicy(protected_segment_ids=["seg-intro"]),
+        user_intent="expand",
+    )
+    llm = _make_mock_llm(
+        [
+            AIMessage(content="Draft introduction content. Expanded argument."),
+            AIMessage(content=_reviewer_response(approved=True)),
+        ]
+    )
+    graph = create_simple_writing_graph(
+        model=llm,
+        prompts=mock_prompts,
+        graph_config=GraphConfig(generation_mode=GenerationMode.SINGLE_SECTION),
+    )
+    state = {
+        **base_state,
+        "outline": outline,
+        "outline_approved": True,
+        "sections": sections,
+        "current_section_index": 0,
+        "status": "writing",
+        "existing_content": existing_content,
+    }
+
+    result = await graph.ainvoke(
+        state, config={"configurable": {"thread_id": "g-test-draft-single"}}
+    )
+
+    assert result["status"] == "section_done"
+    assert result["writer_input"].draft_context is not None
+    assert result["writer_input"].draft_context.mapped_segments[0].segment_id == "seg-intro"
 
 
 @pytest.mark.asyncio

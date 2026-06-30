@@ -54,6 +54,7 @@ class GraphConfig(BaseModel):
     require_outline_approval: bool = True
     enable_outline_quality_gate: bool = True
     enable_budget_gate: bool = True
+    enable_draft_integration: bool = True
     enable_exemplar_context: bool = False
     enable_similarity_gate: bool = False
     enable_reference_generator: bool = True

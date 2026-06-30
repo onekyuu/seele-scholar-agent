@@ -1,4 +1,6 @@
 from ..budget import BudgetState, SectionBudget
+from ..draft.mapping import build_draft_section_context
+from ..draft.models import DraftSectionContext, coerce_draft_integration_state
 from ..exemplar.models import ExemplarContext, coerce_exemplar_context
 from ..state import (
     AgentState,
@@ -35,6 +37,7 @@ class WriterInputBuilder:
             review_comments=list(section.review_comments),
             style_context=style_context,
             exemplar_context=_exemplar_context(state),
+            draft_context=_draft_context(state, current_index),
         )
 
 
@@ -136,6 +139,15 @@ def _exemplar_context(state: AgentState) -> ExemplarContext | None:
     if raw is None:
         return None
     return coerce_exemplar_context(raw)
+
+
+def _draft_context(state: AgentState, current_index: int) -> DraftSectionContext | None:
+    draft_state = coerce_draft_integration_state(state.get("draft_integration"))
+    return build_draft_section_context(
+        draft_state,
+        sections=list(state.get("sections", []) or []),
+        current_index=current_index,
+    )
 
 
 def _section_budget(

@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 
 from ..agent_config import PromptsConfig
 from ..document_profile import get_target_word_count, is_research_proposal
+from ..draft.models import coerce_draft_integration_state
 from ..i18n import t, t_list
 from ..logging import get_logger
 from ..state import (
@@ -347,6 +348,9 @@ class PlannerNode:
         target_word_count: str,
     ) -> str:
         context = build_planner_style_context(state, paper_type, structure_pattern)
+        draft_context = self._build_draft_planner_context(state)
+        if draft_context:
+            context += "\n\n" + draft_context
         if not is_research_proposal(state):
             return context
         proposal_lines = [
@@ -370,6 +374,35 @@ class PlannerNode:
             f"- Total target length: {target_word_count}. Allocate target_words per section.",
         ]
         return context + "\n" + "\n".join(proposal_lines)
+
+    def _build_draft_planner_context(self, state: AgentState) -> str:
+        draft_state = coerce_draft_integration_state(state.get("draft_integration"))
+        if draft_state is None:
+            return ""
+        decision = draft_state.outline_decision
+        lines = [
+            "Draft integration context:",
+            f"- User intent: {draft_state.existing_content.user_intent}",
+            f"- Preserve mode: {draft_state.existing_content.preserve_policy.mode}",
+        ]
+        if decision is not None:
+            lines.append(f"- Outline adaptation: {decision.action}")
+            lines.extend(f"  reason: {reason}" for reason in decision.reasons)
+        if draft_state.uncovered_requirements:
+            lines.append(
+                "- Unmapped draft segments: " + ", ".join(draft_state.uncovered_requirements)
+            )
+        if draft_state.conflicts:
+            lines.append("- Draft conflicts:")
+            lines.extend(f"  - {conflict}" for conflict in draft_state.conflicts)
+        lines.append("- Draft segments:")
+        for segment in draft_state.existing_content.segments[:8]:
+            heading = f"{segment.detected_heading}: " if segment.detected_heading else ""
+            snippet = segment.text[:220]
+            if len(segment.text) > 220:
+                snippet += "..."
+            lines.append(f"  - [{segment.segment_id}] {segment.inferred_role}: {heading}{snippet}")
+        return "\n".join(lines)
 
     def _normalize_proposal_outline(
         self, outline: OutlineStructure, topic: str

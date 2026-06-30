@@ -1,6 +1,19 @@
 from .agent_config import BudgetAllocatorFunc, GraphConfig, PaperSearchFunc, RAGRetrieverFunc
 from .budget import BudgetAllocatorNode, BudgetPolicy, BudgetState, SectionBudget
 from .citation import CitationSource, CitationSourceGateNode, RetrievalDiagnostic, SourceQuality
+from .draft import (
+    ConflictGate,
+    CoverageGate,
+    DraftIntegrationNode,
+    DraftIntegrationState,
+    DraftOutlineMapping,
+    DraftSectionContext,
+    DraftSegment,
+    ExistingContentRef,
+    OutlineAdaptationDecision,
+    PreservationGate,
+    PreservePolicy,
+)
 from .evals import QualityMetrics, evaluate_quality
 from .exemplar import (
     ExemplarChunk,
@@ -71,6 +84,17 @@ __all__ = [
     "CitationSourceGateNode",
     "RetrievalDiagnostic",
     "SourceQuality",
+    "ExistingContentRef",
+    "DraftSegment",
+    "PreservePolicy",
+    "DraftOutlineMapping",
+    "OutlineAdaptationDecision",
+    "DraftIntegrationState",
+    "DraftSectionContext",
+    "DraftIntegrationNode",
+    "PreservationGate",
+    "CoverageGate",
+    "ConflictGate",
     "ExemplarMaterial",
     "ExemplarChunk",
     "ExemplarContext",
