@@ -731,7 +731,7 @@ class WriterNode:
             "previous_sections": self._previous_summaries_text(writer_input),
             "numbered_papers": numbered_papers,
             "rag_context": rag_context,
-            "style_guidance": writer_input.style_context,
+            "style_guidance": self._style_guidance_with_exemplar_context(writer_input),
             "review_comments": self._review_comments_text(writer_input),
             "current_content": section.content or "无",
         }
@@ -819,6 +819,40 @@ class WriterNode:
         if not writer_input.review_comments:
             return "无"
         return "\n".join(f"- {comment}" for comment in writer_input.review_comments)
+
+    def _style_guidance_with_exemplar_context(self, writer_input: WriterInput) -> str:
+        parts = [writer_input.style_context.strip()] if writer_input.style_context.strip() else []
+        exemplar_context = writer_input.exemplar_context
+        if exemplar_context is None:
+            return "\n\n".join(parts) if parts else "无"
+
+        exemplar_lines: list[str] = []
+        if exemplar_context.outline_patterns:
+            exemplar_lines.append("Outline patterns:")
+            exemplar_lines.extend(f"- {pattern}" for pattern in exemplar_context.outline_patterns)
+        if exemplar_context.style_notes:
+            exemplar_lines.append("Style notes:")
+            exemplar_lines.extend(f"- {note}" for note in exemplar_context.style_notes)
+        if exemplar_context.section_examples:
+            exemplar_lines.append("Section examples:")
+            for example in exemplar_context.section_examples:
+                snippet = example.text[:500]
+                if len(example.text) > 500:
+                    snippet += "..."
+                label = example.section_title or example.section_role or example.chunk_id
+                exemplar_lines.append(f"- [{example.chunk_id}] {label}: {snippet}")
+        anti_copying_notes = exemplar_context.anti_copying_notes or [
+            "Use exemplar materials only as structure/style references; do not copy wording."
+        ]
+        exemplar_lines.append("Anti-copying notes:")
+        exemplar_lines.extend(f"- {note}" for note in anti_copying_notes)
+
+        if exemplar_lines:
+            parts.append(
+                "Exemplar context (reference only, do not reuse wording):\n"
+                + "\n".join(exemplar_lines)
+            )
+        return "\n\n".join(parts) if parts else "无"
 
     def _budget_diagnostic_value(self, spec: SectionWritingSpec) -> int | None:
         if spec.budget is None:

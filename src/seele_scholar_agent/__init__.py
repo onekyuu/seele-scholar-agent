@@ -2,6 +2,15 @@ from .agent_config import BudgetAllocatorFunc, GraphConfig, PaperSearchFunc, RAG
 from .budget import BudgetAllocatorNode, BudgetPolicy, BudgetState, SectionBudget
 from .citation import CitationSource, CitationSourceGateNode, RetrievalDiagnostic, SourceQuality
 from .evals import QualityMetrics, evaluate_quality
+from .exemplar import (
+    ExemplarChunk,
+    ExemplarContext,
+    ExemplarMaterial,
+    ExemplarPlannerContextNode,
+    ExemplarPolicy,
+    ExemplarSectionRetrieverNode,
+    SimilarityGateNode,
+)
 from .graph import create_simple_writing_graph, create_writing_graph
 from .logging import setup_logging
 from .nodes import NodeStreamEvent
@@ -62,6 +71,13 @@ __all__ = [
     "CitationSourceGateNode",
     "RetrievalDiagnostic",
     "SourceQuality",
+    "ExemplarMaterial",
+    "ExemplarChunk",
+    "ExemplarContext",
+    "ExemplarPolicy",
+    "ExemplarPlannerContextNode",
+    "ExemplarSectionRetrieverNode",
+    "SimilarityGateNode",
     "OutlineContext",
     "SectionBrief",
     "SectionWritingSpec",

@@ -1,4 +1,5 @@
 from seele_scholar_agent.budget import BudgetState, SectionBudget
+from seele_scholar_agent.exemplar import ExemplarContext
 from seele_scholar_agent.writing import WriterInputBuilder
 
 
@@ -22,6 +23,7 @@ def test_writer_input_builder_injects_outline_and_budget(state_with_outline):
     assert writer_input.current_section.title == "Introduction"
     assert writer_input.current_section.budget == budget
     assert writer_input.style_context == "Style guidance."
+    assert writer_input.exemplar_context is None
 
 
 def test_writer_input_builder_uses_previous_section_summaries(state_with_outline):
@@ -42,3 +44,20 @@ def test_writer_input_builder_uses_previous_section_summaries(state_with_outline
         "[Introduction]\nIntro summary.",
         "[Related]\nRelated summary.",
     ]
+
+
+def test_writer_input_builder_injects_exemplar_context(state_with_outline):
+    exemplar_context = ExemplarContext(
+        outline_patterns=["Move from gap to contribution."],
+        style_notes=["Prefer compact transitions."],
+    )
+    state = {**state_with_outline, "exemplar_context": exemplar_context}
+
+    writer_input = WriterInputBuilder().build(
+        state,
+        current_index=0,
+        evidence_packets=[],
+        style_context="",
+    )
+
+    assert writer_input.exemplar_context == exemplar_context

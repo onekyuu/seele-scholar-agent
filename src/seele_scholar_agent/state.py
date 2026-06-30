@@ -269,3 +269,7 @@ class AgentState(TypedDict):
     citation_sources: NotRequired[list[Any]]
     retrieval_diagnostics: NotRequired[list[Any]]
     citation_source_diagnostics: NotRequired[dict[str, Any]]
+    exemplar_materials: NotRequired[list[Any]]
+    exemplar_chunks: NotRequired[list[Any]]
+    exemplar_context: NotRequired[Any]
+    exemplar_similarity_diagnostics: NotRequired[dict[str, Any]]
