@@ -19,12 +19,14 @@ from .base import (
     PROFILE_DRAFT_MODE,
     PROFILE_REVISION_MODE,
     ClaimSourceAuditCase,
+    DefaultDocumentProfile,
     ProfileWriterPrompts,
     ReviewIssueCategory,
     WriterMode,
 )
 
 RESEARCH_PROPOSAL_PROFILE_NAME = "research_proposal"
+DEFAULT_RESEARCH_PROPOSAL_TARGET_CHARS = 2200
 
 PROPOSAL_REVISION_USER_PROMPT = """研究主题：{topic}
 
@@ -142,7 +144,7 @@ _PROPOSAL_RESULT_MARKERS = (
 )
 
 
-class ResearchProposalProfile:
+class ResearchProposalProfile(DefaultDocumentProfile):
     name = RESEARCH_PROPOSAL_PROFILE_NAME
     allow_empty_references = True
     skip_auto_finalizer = True
@@ -186,6 +188,9 @@ class ResearchProposalProfile:
             f"- Total target length: {target_word_count}. Allocate target_words per section.",
         ]
         return "\n".join(proposal_lines)
+
+    def default_target_word_count(self) -> int | None:
+        return DEFAULT_RESEARCH_PROPOSAL_TARGET_CHARS
 
     def writer_mode(self, has_revision_context: bool) -> WriterMode:
         return PROFILE_REVISION_MODE if has_revision_context else PROFILE_DRAFT_MODE

@@ -2,7 +2,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from ..document_profile import is_research_proposal
+from ..document_profile import get_config_value, is_research_proposal
 from ..state import OutlineStructure, QualityIssue, ReviewIssue, ReviewResult, SectionOutline
 
 WriterMode = Literal["draft", "academic_revision", "profile_draft", "profile_revision"]
@@ -41,6 +41,10 @@ class DocumentProfile(Protocol):
     ) -> OutlineStructure: ...
 
     def planner_context_suffix(self, target_word_count: str) -> str: ...
+
+    def target_word_count(self, state: Mapping[str, Any]) -> int | None: ...
+
+    def default_target_word_count(self) -> int | None: ...
 
     def writer_mode(self, has_revision_context: bool) -> WriterMode: ...
 
@@ -120,6 +124,22 @@ class DefaultDocumentProfile:
 
     def planner_context_suffix(self, target_word_count: str) -> str:
         return ""
+
+    def target_word_count(self, state: Mapping[str, Any]) -> int | None:
+        raw = get_config_value(state, "target_word_count")
+        if raw is None:
+            raw = get_config_value(state, "target_chars")
+        if raw is None:
+            raw = get_config_value(state, "target_character_count")
+        if raw is None:
+            return self.default_target_word_count()
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return self.default_target_word_count()
+
+    def default_target_word_count(self) -> int | None:
+        return None
 
     def writer_mode(self, has_revision_context: bool) -> WriterMode:
         return "academic_revision" if has_revision_context else "draft"
