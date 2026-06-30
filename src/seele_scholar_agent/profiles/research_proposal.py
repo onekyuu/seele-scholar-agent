@@ -119,6 +119,7 @@ class ResearchProposalProfile:
     allow_empty_references = True
     skip_auto_finalizer = True
     uses_profile_outline_quality = True
+    uses_strict_academic_integrity = False
 
     def effective_paper_type(self, requested: str) -> str:
         return RESEARCH_PROPOSAL_PROFILE_NAME if requested == "auto" else requested
