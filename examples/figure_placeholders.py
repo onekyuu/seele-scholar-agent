@@ -19,8 +19,8 @@ def extract_figures(content: str) -> list[dict[str, object]]:
 
 if __name__ == "__main__":
     sample = (
-        "模型性能如下。"
-        "{{FIGURE: Accuracy comparison across datasets | chunks:[abc123, def456]}}"
+        "模型性能如下。{{FIGURE: Accuracy comparison across datasets "
+        "| chunks:[evidence-openalex-1, evidence-user-2]}}"
     )
     for figure in extract_figures(sample):
         print(figure)

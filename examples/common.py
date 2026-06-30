@@ -5,7 +5,14 @@ from uuid import uuid4
 from langchain_openai import ChatOpenAI
 from seele_scholar_agent.agent_config import PromptsConfig
 from seele_scholar_agent.config import settings
-from seele_scholar_agent.state import AgentState
+from seele_scholar_agent.state import AgentState, MaterialRegistry, MaterialRegistryEntry
+
+
+def _env_int(name: str) -> int | None:
+    value = getenv(name)
+    if value is None or not value.strip():
+        return None
+    return int(value)
 
 
 def build_model() -> ChatOpenAI:
@@ -234,11 +241,29 @@ Return JSON:
     )
 
 
-def build_initial_state(topic: str, language: str = "zh") -> AgentState:
-    return AgentState(
+def build_initial_state(
+    topic: str,
+    language: str = "zh",
+    *,
+    document_type: str = "academic_paper",
+    paper_type: str = "auto",
+    structure_pattern: str = "auto",
+    target_word_count: int | None = None,
+    strict_academic_mode: bool = True,
+    style_profile: str | None = None,
+) -> AgentState:
+    writing_locale = {"zh": "zh-CN", "ja": "ja-JP", "en": "en-US"}.get(
+        language, language
+    )
+    state = AgentState(
         thread_id=str(uuid4()),
         topic=topic,
+        document_type=document_type,
+        paper_type=paper_type,
+        structure_pattern=structure_pattern,
         language=language,  # type: ignore[arg-type]
+        writing_locale=writing_locale,
+        strict_academic_mode=strict_academic_mode,
         created_at=datetime.now(),
         tenant_id=None,
         broad_papers=[],
@@ -251,6 +276,7 @@ def build_initial_state(topic: str, language: str = "zh") -> AgentState:
         current_section_index=0,
         sections_completed=[],
         review_history=[],
+        section_candidates=[],
         current_review=None,
         rag_context=[],
         evidence_packets=[],
@@ -265,4 +291,76 @@ def build_initial_state(topic: str, language: str = "zh") -> AgentState:
         consistency_issues=[],
         consistency_checked=False,
         quality_issues=[],
+        quality_issue_history=[],
+    )
+    if target_word_count is not None:
+        state["target_word_count"] = target_word_count
+    if style_profile is not None:
+        state["style_profile"] = style_profile
+    return state
+
+
+def build_research_proposal_state(
+    topic: str,
+    language: str = "ja",
+    *,
+    target_chars: int = 2200,
+) -> AgentState:
+    state = build_initial_state(
+        topic=topic,
+        language=language,
+        document_type="research_proposal",
+        paper_type="auto",
+        structure_pattern="auto",
+        target_word_count=target_chars,
+        strict_academic_mode=False,
+        style_profile="graduate_research_proposal",
+    )
+    state["generation_config"] = {
+        "document_type": "research_proposal",
+        "target_chars": target_chars,
+    }
+    state["metadata"] = {
+        "audience": "Japanese graduate-school application reviewers",
+    }
+    return state
+
+
+def build_state_from_env(
+    default_topic: str,
+    default_language: str = "zh",
+) -> AgentState:
+    topic = getenv("SCHOLAR_TOPIC", default_topic)
+    language = getenv("SCHOLAR_LANGUAGE", default_language)
+    document_type = getenv("SCHOLAR_DOCUMENT_TYPE", "academic_paper")
+    if document_type.strip().lower().replace("-", "_") in {
+        "research_proposal",
+        "proposal",
+        "graduate_research_proposal",
+    }:
+        return build_research_proposal_state(
+            topic=topic,
+            language=language,
+            target_chars=_env_int("SCHOLAR_TARGET_CHARS") or 2200,
+        )
+    return build_initial_state(
+        topic=topic,
+        language=language,
+        document_type=document_type,
+        target_word_count=_env_int("SCHOLAR_TARGET_WORD_COUNT"),
+    )
+
+
+def build_example_material_registry() -> MaterialRegistry:
+    return MaterialRegistry(
+        entries=[
+            MaterialRegistryEntry(
+                paper_id="local:demo-paper",
+                source_origin="user_upload",
+                citation_role="citable",
+                confidence="trusted",
+                required=True,
+                notes="Example caller-provided source that should remain citable.",
+            )
+        ]
     )
