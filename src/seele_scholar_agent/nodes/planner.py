@@ -6,7 +6,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from ..agent_config import PromptsConfig
-from ..document_profile import get_target_word_count
 from ..draft.models import coerce_draft_integration_state
 from ..i18n import t, t_list
 from ..logging import get_logger
@@ -57,7 +56,7 @@ class PlannerNode:
         paper_type = self._effective_paper_type(state, profile)
         structure_pattern = self._effective_structure_pattern(state, profile)
         target_word_count = str(
-            get_target_word_count(state) or state.get("target_word_count", "auto")
+            profile.target_word_count(state) or state.get("target_word_count", "auto")
         )
         style_context = self._build_planner_context(
             state, paper_type, structure_pattern, target_word_count, profile
@@ -121,7 +120,7 @@ class PlannerNode:
         paper_type = self._effective_paper_type(state, profile)
         structure_pattern = self._effective_structure_pattern(state, profile)
         target_word_count = str(
-            get_target_word_count(state) or state.get("target_word_count", "auto")
+            profile.target_word_count(state) or state.get("target_word_count", "auto")
         )
         style_context = self._build_planner_context(
             state, paper_type, structure_pattern, target_word_count, profile

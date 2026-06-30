@@ -22,6 +22,7 @@ def test_default_profile_review_input_policy():
     assert profile.include_paragraph_structure_check() is True
     assert profile.is_schedule_section("Schedule") is False
     assert profile.section_description_constraints("Schedule") == []
+    assert profile.target_word_count({}) is None
 
 
 def test_research_proposal_profile_review_input_policy():
@@ -38,6 +39,8 @@ def test_research_proposal_profile_review_input_policy():
     assert "1年次前期" in profile.section_description_constraints(
         "研究計画・スケジュール"
     )[0]
+    assert profile.target_word_count({}) == 2200
+    assert profile.target_word_count({"target_word_count": 2500}) == 2500
 
 
 def test_research_proposal_profile_flags_incomplete_schedule():
