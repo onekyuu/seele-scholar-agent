@@ -68,6 +68,8 @@ class DocumentProfile(Protocol):
         binding_diagnostics: dict[str, Any] | None = None,
     ) -> QualityIssue: ...
 
+    def include_paragraph_structure_check(self) -> bool: ...
+
     def empty_reference_issue(self) -> QualityIssue | None: ...
 
     def structural_review_issues(
@@ -149,6 +151,9 @@ class DefaultDocumentProfile:
         binding_diagnostics: dict[str, Any] | None = None,
     ) -> QualityIssue:
         return quality_issue
+
+    def include_paragraph_structure_check(self) -> bool:
+        return True
 
     def empty_reference_issue(self) -> QualityIssue | None:
         return None

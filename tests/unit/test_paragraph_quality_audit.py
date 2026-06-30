@@ -56,6 +56,22 @@ def test_paragraph_quality_audit_flags_missing_evidence_and_analysis():
     assert "analysis" in findings[0].description
 
 
+def test_paragraph_quality_audit_can_skip_structure_check():
+    audit = ParagraphQualityAudit()
+
+    findings = audit.audit(
+        section_title="Discussion",
+        content=(
+            "The proposed approach offers a broad conceptual framing for the system. "
+            "The paragraph describes the architecture, the workflow, and the expected "
+            "contribution across several parts of the paper without grounding details."
+        ),
+        include_structure_check=False,
+    )
+
+    assert findings == []
+
+
 def test_paragraph_quality_audit_accepts_complete_paragraph():
     audit = ParagraphQualityAudit()
 

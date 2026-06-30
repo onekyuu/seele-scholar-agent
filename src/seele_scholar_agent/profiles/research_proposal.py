@@ -247,6 +247,9 @@ class ResearchProposalProfile:
             }
         )
 
+    def include_paragraph_structure_check(self) -> bool:
+        return False
+
     def empty_reference_issue(self) -> QualityIssue | None:
         return QualityIssue(
             code="PROPOSAL_NO_INLINE_CITATIONS",
