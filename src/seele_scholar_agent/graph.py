@@ -23,6 +23,12 @@ from .agent_config import (
 from .budget import BudgetAllocatorNode, BudgetPolicy, BudgetRevisionNode, LengthGateNode
 from .citation import CitationSourceGateNode
 from .config import settings
+from .exemplar import (
+    ExemplarPlannerContextNode,
+    ExemplarPolicy,
+    ExemplarSectionRetrieverNode,
+    SimilarityGateNode,
+)
 from .nodes.consistency_checker import ConsistencyCheckerNode
 from .nodes.finalizer import FinalizerNode
 from .nodes.integrity_gate import IntegrityGateNode
@@ -55,6 +61,17 @@ def create_writing_graph(
     writing_policy = writing_policy or WritingPolicy()
     budget_policy = budget_policy or BudgetPolicy()
     execution_strategy = SectionExecutionStrategy(graph_config.section_execution_policy())
+    needs_budget_gate = graph_config.enable_budget_gate and writing_policy.enable_budget_gate
+    writer_entry = (
+        "exemplar_section_retriever" if graph_config.enable_exemplar_context else "writer"
+    )
+    post_writer_entry = (
+        "similarity_gate"
+        if graph_config.enable_similarity_gate
+        else "length_gate"
+        if needs_budget_gate
+        else "reviewer"
+    )
 
     topic_proposer = TopicProposerNode(llm=model, prompts=prompts)
     researcher = ResearcherNode(
@@ -65,6 +82,11 @@ def create_writing_graph(
         extra_paper_retrievers=extra_paper_retrievers,
     )
     citation_source_gate = CitationSourceGateNode()
+    exemplar_policy = ExemplarPolicy(enabled=graph_config.enable_exemplar_context)
+    similarity_policy = ExemplarPolicy(enabled=graph_config.enable_similarity_gate)
+    exemplar_planner_context = ExemplarPlannerContextNode(policy=exemplar_policy)
+    exemplar_section_retriever = ExemplarSectionRetrieverNode(policy=exemplar_policy)
+    similarity_gate = SimilarityGateNode(policy=similarity_policy)
     planner = PlannerNode(llm=model, prompts=prompts)
     outline_quality_gate = OutlineQualityGateNode()
     writer = WriterNode(
@@ -94,6 +116,9 @@ def create_writing_graph(
     graph.add_node("topic_proposer", topic_proposer.propose)
     graph.add_node("researcher", researcher.search)
     graph.add_node("citation_source_gate", citation_source_gate.build)
+    graph.add_node("exemplar_planner_context", exemplar_planner_context.build)
+    graph.add_node("exemplar_section_retriever", exemplar_section_retriever.retrieve)
+    graph.add_node("similarity_gate", similarity_gate.check)
     graph.add_node("planner", planner.plan)
     graph.add_node("outline_quality_gate", outline_quality_gate.check)
     graph.add_node("writer", writer.write)
@@ -107,33 +132,38 @@ def create_writing_graph(
     graph.add_node("integrity_gate", integrity_gate.check)
 
     if graph_config.generation_mode == GenerationMode.SINGLE_SECTION:
-        graph.add_edge(START, "writer")
+        graph.add_edge(START, writer_entry)
     elif not graph_config.enable_topic_proposer:
         graph.add_edge(START, "researcher")
     else:
         graph.add_edge(START, "topic_proposer")
         graph.add_edge("topic_proposer", "researcher")
     graph.add_edge("researcher", "citation_source_gate")
-    graph.add_edge("citation_source_gate", "planner")
+    if graph_config.enable_exemplar_context:
+        graph.add_edge("citation_source_gate", "exemplar_planner_context")
+        graph.add_edge("exemplar_planner_context", "planner")
+        graph.add_edge("exemplar_section_retriever", "writer")
+    else:
+        graph.add_edge("citation_source_gate", "planner")
     if graph_config.enable_outline_quality_gate:
         graph.add_edge("planner", "outline_quality_gate")
         graph.add_conditional_edges(
             "outline_quality_gate",
             route_quality_gate,
-            {"writer": "writer", "end": END},
+            {"writer": writer_entry, "end": END},
         )
     else:
-        graph.add_edge("planner", "writer")
-    if graph_config.enable_budget_gate and writing_policy.enable_budget_gate:
-        graph.add_edge("writer", "length_gate")
+        graph.add_edge("planner", writer_entry)
+    graph.add_edge("writer", post_writer_entry)
+    if graph_config.enable_similarity_gate:
+        graph.add_edge("similarity_gate", "length_gate" if needs_budget_gate else "reviewer")
+    if needs_budget_gate:
         graph.add_conditional_edges(
             "length_gate",
             lambda state: route_length_gate(state, budget_policy),
             {"budget_reviser": "budget_reviser", "reviewer": "reviewer"},
         )
         graph.add_edge("budget_reviser", "length_gate")
-    else:
-        graph.add_edge("writer", "reviewer")
 
     completed_route = _first_enabled_postprocess_node(graph_config)
 
@@ -145,6 +175,8 @@ def create_writing_graph(
         )
         if route == "writer" and budget_allocator is not None:
             return "budget_allocator"
+        if route == "writer":
+            return writer_entry
         return route
 
     graph.add_conditional_edges(
@@ -152,6 +184,7 @@ def create_writing_graph(
         route_reviewer,
         {
             "writer": "writer",
+            "exemplar_section_retriever": "exemplar_section_retriever",
             "budget_allocator": "budget_allocator",
             "finalizer": "finalizer",
             "reference_generator": "reference_generator",
@@ -160,7 +193,7 @@ def create_writing_graph(
             "end": END,
         },
     )
-    graph.add_edge("budget_allocator", "writer")
+    graph.add_edge("budget_allocator", writer_entry)
     _add_postprocess_edges(graph, graph_config)
 
     return _compile_graph(graph, interrupt_after=interrupt_after)

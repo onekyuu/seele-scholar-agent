@@ -3,6 +3,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from ..budget import SectionBudget
+from ..exemplar.models import ExemplarContext
 from ..state import EvidencePacket, PaperMetadata, SectionStyleGuidance
 
 
@@ -53,3 +54,4 @@ class WriterInput(BaseModel):
     evidence_packets: list[EvidencePacket] = Field(default_factory=list)
     review_comments: list[str] = Field(default_factory=list)
     style_context: str = ""
+    exemplar_context: ExemplarContext | None = None

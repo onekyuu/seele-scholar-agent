@@ -11,6 +11,8 @@ from langchain_openai import ChatOpenAI
 from seele_scholar_agent import (
     BudgetPolicy,
     BudgetState,
+    ExemplarChunk,
+    ExemplarMaterial,
     GenerationMode,
     GraphConfig,
     SectionBudget,
@@ -375,6 +377,57 @@ async def test_graph_budget_revision_runs_before_review(base_state, mock_prompts
     assert result["sections"][0].content == "one two"
     assert result["budget_revision_rounds"]["section_0"] == 1
     assert result["budget_state"].section_actuals["section_0"] == 2
+
+
+@pytest.mark.asyncio
+async def test_graph_exemplar_context_reaches_writer(base_state, mock_prompts):
+    with respx.mock(assert_all_mocked=False, assert_all_called=False) as respx_mock:
+        _mock_http(respx_mock)
+
+        llm = _make_mock_llm(
+            [
+                AIMessage(content=_planner_response()),
+                AIMessage(content="Claim for Introduction content."),
+                AIMessage(content=_reviewer_response(approved=True)),
+            ]
+        )
+
+        graph = create_simple_writing_graph(
+            model=llm,
+            prompts=mock_prompts,
+            skip_topic_proposer=True,
+            graph_config=GraphConfig(enable_exemplar_context=True),
+        )
+        state = {
+            **base_state,
+            "outline_approved": True,
+            "exemplar_materials": [
+                ExemplarMaterial(
+                    exemplar_id="ex-1",
+                    usage_role="section_reference",
+                    outline_patterns=["Motivation -> gap -> contribution"],
+                    style_notes=["Use cautious synthesis language."],
+                )
+            ],
+            "exemplar_chunks": [
+                ExemplarChunk(
+                    exemplar_id="ex-1",
+                    chunk_id="intro-example",
+                    section_title="Introduction",
+                    text="Example introduction starts broad and narrows to a gap.",
+                )
+            ],
+        }
+
+        result = await graph.ainvoke(
+            state, config={"configurable": {"thread_id": "g-test-exemplar"}}
+        )
+
+    assert result["status"] == "completed"
+    writer_input = result["writer_input"]
+    assert writer_input.exemplar_context is not None
+    assert "Motivation -> gap -> contribution" in writer_input.exemplar_context.outline_patterns
+    assert writer_input.exemplar_context.section_examples[0].chunk_id == "intro-example"
 
 
 # ---------------------------------------------------------------------------

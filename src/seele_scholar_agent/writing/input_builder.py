@@ -1,4 +1,5 @@
 from ..budget import BudgetState, SectionBudget
+from ..exemplar.models import ExemplarContext, coerce_exemplar_context
 from ..state import (
     AgentState,
     EvidencePacket,
@@ -33,6 +34,7 @@ class WriterInputBuilder:
             evidence_packets=evidence_packets,
             review_comments=list(section.review_comments),
             style_context=style_context,
+            exemplar_context=_exemplar_context(state),
         )
 
 
@@ -127,6 +129,13 @@ def _previous_summaries(state: AgentState, current_index: int) -> list[str]:
 def _citation_sources(state: AgentState) -> list[object]:
     raw = state.get("citation_sources", [])
     return raw if isinstance(raw, list) else []
+
+
+def _exemplar_context(state: AgentState) -> ExemplarContext | None:
+    raw = state.get("exemplar_context")
+    if raw is None:
+        return None
+    return coerce_exemplar_context(raw)
 
 
 def _section_budget(

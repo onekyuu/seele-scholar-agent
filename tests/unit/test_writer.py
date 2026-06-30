@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
+from seele_scholar_agent.exemplar import ExemplarChunk, ExemplarContext
 from seele_scholar_agent.nodes.writer import WriterNode
 from seele_scholar_agent.state import (
     AgentState,
@@ -41,6 +42,40 @@ async def test_writer_normal_write(mock_llm, mock_prompts, state_with_outline):
     assert result["sections"][0].status == "review"
     assert result["status"] == "reviewing"
     assert "Writing locale: zh-CN" in captured_input["style_guidance"]
+
+
+@pytest.mark.asyncio
+async def test_writer_adds_exemplar_context_to_style_guidance(
+    mock_llm, mock_prompts, state_with_outline
+):
+    captured_input: dict = {}
+
+    async def capture_invoke(chain, input_data):  # type: ignore[override]
+        captured_input.update(input_data)
+        return AIMessage(content="This is the introduction content.")
+
+    exemplar_context = ExemplarContext(
+        outline_patterns=["Open with motivation, then identify the gap."],
+        section_examples=[
+            ExemplarChunk(
+                exemplar_id="ex-1",
+                chunk_id="intro-example",
+                section_title="Introduction",
+                text="A concise sample introduction structure.",
+            )
+        ],
+        style_notes=["Use cautious synthesis language."],
+    )
+    state = cast(AgentState, {**state_with_outline, "exemplar_context": exemplar_context})
+
+    with patch("seele_scholar_agent.nodes.writer.invoke_with_retry", side_effect=capture_invoke):
+        node = WriterNode(llm=mock_llm, prompts=mock_prompts)
+        await node.write(state)
+
+    assert "Exemplar context" in captured_input["style_guidance"]
+    assert "Open with motivation" in captured_input["style_guidance"]
+    assert "intro-example" in captured_input["style_guidance"]
+    assert "do not reuse wording" in captured_input["style_guidance"]
 
 
 # ---------------------------------------------------------------------------
