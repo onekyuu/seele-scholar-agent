@@ -2,9 +2,9 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from ..config import settings
-from ..document_profile import is_research_proposal
 from ..logging import get_logger
 from ..policy import build_quality_report
+from ..profiles import get_document_profile
 from ..state import AgentState, ClaimEvidenceBinding, EvidencePacket, QualityIssue
 from . import CITATION_PATTERN, NodeStreamEvent
 
@@ -24,7 +24,10 @@ class IntegrityGateNode:
     async def check(self, state: AgentState) -> dict[str, Any]:
         quality_issues = list(state.get("quality_issues") or [])
         strict_issues: list[QualityIssue] = []
-        if state.get("strict_academic_mode", False) and not is_research_proposal(state):
+        if (
+            state.get("strict_academic_mode", False)
+            and get_document_profile(state).uses_strict_academic_integrity
+        ):
             strict_issues = self._strict_academic_issues(state)
             quality_issues.extend(strict_issues)
 

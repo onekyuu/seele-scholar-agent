@@ -22,6 +22,7 @@ class DocumentProfile(Protocol):
     allow_empty_references: bool
     skip_auto_finalizer: bool
     uses_profile_outline_quality: bool
+    uses_strict_academic_integrity: bool
 
     def effective_paper_type(self, requested: str) -> str: ...
 
@@ -55,6 +56,7 @@ class DefaultDocumentProfile:
     allow_empty_references = False
     skip_auto_finalizer = False
     uses_profile_outline_quality = False
+    uses_strict_academic_integrity = True
 
     def effective_paper_type(self, requested: str) -> str:
         return requested
