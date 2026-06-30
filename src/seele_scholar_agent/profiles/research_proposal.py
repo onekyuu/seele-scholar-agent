@@ -289,6 +289,15 @@ class ResearchProposalProfile:
             update={"approved": approved, "issues": normalized_issues}
         ), quality_issues
 
+    def review_diagnostic_fields(self, section_title: str, content: str) -> dict[str, Any]:
+        return {
+            "proposal_profile": True,
+            "reviewer_mode": "proposal_review",
+            "missing_core_tasks": (
+                missing_proposal_core_tasks(section_title, content) if section_title else []
+            ),
+        }
+
     def _core_structure_issues(
         self, section_id: str, section_title: str, content: str
     ) -> tuple[list[ReviewIssue], list[QualityIssue]]:

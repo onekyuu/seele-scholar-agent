@@ -10,10 +10,7 @@ from langchain_openai import ChatOpenAI
 
 from ..agent_config import PromptsConfig
 from ..config import settings
-from ..document_profile import (
-    is_compound_section_title,
-    missing_proposal_core_tasks,
-)
+from ..document_profile import is_compound_section_title
 from ..i18n import t
 from ..logging import get_logger
 from ..policy import SectionExecutionStrategy, WritingPolicy
@@ -246,7 +243,7 @@ class ReviewerNode:
         if quality_issues and "quality_issues" not in result:
             result["quality_issues"] = quality_issues
         result["review_diagnostics"] = self._build_review_diagnostics(
-            review, quality_issues, proposal_profile, section, state
+            review, quality_issues, document_profile, section, state
         )
         return result
 
@@ -412,7 +409,7 @@ class ReviewerNode:
         if quality_issues and "quality_issues" not in final_result:
             final_result["quality_issues"] = quality_issues
         final_result["review_diagnostics"] = self._build_review_diagnostics(
-            review, quality_issues, proposal_profile, section, state
+            review, quality_issues, document_profile, section, state
         )
 
         yield NodeStreamEvent(type="result", result=final_result)
@@ -855,7 +852,7 @@ class ReviewerNode:
         self,
         review: ReviewResult,
         quality_issues: list[QualityIssue],
-        proposal_profile: bool,
+        document_profile: DocumentProfile,
         section: Any | None = None,
         state: AgentState | None = None,
     ) -> dict[str, Any]:
@@ -893,19 +890,14 @@ class ReviewerNode:
         }
         section_title = getattr(section, "title", "") if section is not None else ""
         content = getattr(section, "content", "") if section is not None else ""
+        profile_fields = document_profile.review_diagnostic_fields(section_title, content)
         return {
             **buckets,
-            "proposal_profile": proposal_profile,
-            "reviewer_mode": "proposal_review" if proposal_profile else "academic_review",
+            **profile_fields,
             "section_title": section_title,
             "section_budget": self._section_budget(section, state),
             "compound_title_detected": (
                 is_compound_section_title(section_title) if section_title else False
-            ),
-            "missing_core_tasks": (
-                missing_proposal_core_tasks(section_title, content)
-                if proposal_profile and section_title
-                else []
             ),
             "issue_categories": issue_categories,
             "blocking_issue_count": len(issue_categories["blocking"]),
