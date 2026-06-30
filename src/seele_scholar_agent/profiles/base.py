@@ -50,6 +50,8 @@ class DocumentProfile(Protocol):
 
     def outline_structure_issues(self, outline: OutlineStructure) -> list[QualityIssue]: ...
 
+    def skip_methodology_audit(self, content: str) -> bool: ...
+
 
 class DefaultDocumentProfile:
     name = DEFAULT_PROFILE_NAME
@@ -94,6 +96,9 @@ class DefaultDocumentProfile:
 
     def outline_structure_issues(self, outline: OutlineStructure) -> list[QualityIssue]:
         return []
+
+    def skip_methodology_audit(self, content: str) -> bool:
+        return False
 
 
 def get_document_profile(state: Mapping[str, Any]) -> DocumentProfile:

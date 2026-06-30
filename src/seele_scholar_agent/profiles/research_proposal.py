@@ -113,6 +113,28 @@ PROPOSAL_DRAFT_USER_PROMPT = """研究主题：{topic}
    和交付物/里程碑。
 9. 直接输出正文，不要解释写作过程，不要使用 # 或 ## 标题符号。"""
 
+_PROPOSAL_RESULT_MARKERS = (
+    "results show",
+    "result shows",
+    "experiment showed",
+    "experiments showed",
+    "we found",
+    "we achieved",
+    "achieved",
+    "outperformed",
+    "improved by",
+    "結果は",
+    "結果が",
+    "実験結果",
+    "示した",
+    "達成した",
+    "上回った",
+    "改善した",
+    "结果显示",
+    "实验表明",
+    "我们发现",
+)
+
 
 class ResearchProposalProfile:
     name = RESEARCH_PROPOSAL_PROFILE_NAME
@@ -277,6 +299,10 @@ class ResearchProposalProfile:
                 )
             )
         return issues
+
+    def skip_methodology_audit(self, content: str) -> bool:
+        lowered = content.casefold()
+        return not any(marker.casefold() in lowered for marker in _PROPOSAL_RESULT_MARKERS)
 
 
 def default_proposal_outline(topic: str) -> dict[str, Any]:

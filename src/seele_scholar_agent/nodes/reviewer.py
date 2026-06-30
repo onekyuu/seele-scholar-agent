@@ -21,6 +21,7 @@ from ..document_profile import (
 from ..i18n import t
 from ..logging import get_logger
 from ..policy import SectionExecutionStrategy, WritingPolicy
+from ..profiles import get_document_profile
 from ..review import (
     ReviewDecision,
     SectionCandidate,
@@ -686,12 +687,13 @@ class ReviewerNode:
         structure_pattern = str(
             state.get("structure_pattern") or getattr(outline, "structure_pattern", "") or ""
         )
+        document_profile = get_document_profile(state)
         findings = self.methodology_audit.audit(
             section_title=section_title,
             content=content,
             paper_type=paper_type,
             structure_pattern=structure_pattern,
-            document_type="research_proposal" if is_research_proposal(state) else "",
+            skip_methodology_audit=document_profile.skip_methodology_audit(content),
         )
 
         review_issues = [self._methodology_review_issue(finding) for finding in findings]
