@@ -822,7 +822,7 @@ async def test_proposal_schedule_rewrite_prompt_requires_two_year_timeline(
         node = WriterNode(llm=mock_llm, prompts=mock_prompts)
         result = await node.write(state)
 
-    rendered_user_prompt = node.proposal_revision_prompt.format_messages(**captured_input)[
+    rendered_user_prompt = node.profile_revision_prompt.format_messages(**captured_input)[
         1
     ].content
     assert result["writer_diagnostics"]["revision_mode"] is True
@@ -885,10 +885,10 @@ def test_writer_uses_prompt_overrides(mock_llm, mock_prompts):
 
     node = WriterNode(llm=mock_llm, prompts=prompts)
 
-    assert "CUSTOM PROPOSAL DRAFT X" in node.proposal_draft_prompt.format(
+    assert "CUSTOM PROPOSAL DRAFT X" in node.profile_draft_prompt.format(
         topic="X", language="English"
     )
-    assert "CUSTOM PROPOSAL REVISION X" in node.proposal_revision_prompt.format(
+    assert "CUSTOM PROPOSAL REVISION X" in node.profile_revision_prompt.format(
         topic="X", language="English"
     )
     assert "CUSTOM ACADEMIC REVISION X" in node.academic_revision_prompt.format(
@@ -1007,10 +1007,10 @@ async def test_proposal_initial_draft_uses_proposal_prompt(
         node = WriterNode(llm=mock_llm, prompts=mock_prompts)
         result = await node.write(state)
 
-    rendered_user_prompt = node.proposal_draft_prompt.format_messages(**captured_input)[
+    rendered_user_prompt = node.profile_draft_prompt.format_messages(**captured_input)[
         1
     ].content
-    assert result["writer_diagnostics"]["writer_mode"] == "proposal_draft"
+    assert result["writer_diagnostics"]["writer_mode"] == "profile_draft"
     assert result["writer_diagnostics"]["revision_mode"] is False
     assert result["writer_diagnostics"]["section_title"] == "研究目的・研究課題"
     assert result["writer_diagnostics"]["section_budget"] == 450
