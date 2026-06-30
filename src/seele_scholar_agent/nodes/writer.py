@@ -14,7 +14,6 @@ from ..i18n import t
 from ..logging import get_logger
 from ..policy import SectionExecutionStrategy
 from ..profiles import (
-    DEFAULT_PROFILE_NAME,
     PROFILE_DRAFT_MODE,
     PROFILE_REVISION_MODE,
     DocumentProfile,
@@ -393,7 +392,6 @@ class WriterNode:
 
         section = sections[current_index]
         document_profile = get_document_profile(state)
-        specialized_profile = document_profile.name != DEFAULT_PROFILE_NAME
         writer_mode = self._writer_mode(state, section)
         revision_mode = self._has_revision_context(section)
 
@@ -477,7 +475,7 @@ class WriterNode:
                 "revision_mode": revision_mode,
                 "writer_mode": writer_mode,
                 "profile_name": document_profile.name,
-                "proposal_profile": specialized_profile,
+                **document_profile.writer_diagnostic_fields(),
                 "section_title": section.title,
                 "section_budget": self._budget_diagnostic_value(
                     writer_input.current_section
@@ -518,7 +516,6 @@ class WriterNode:
 
         section = sections[current_index]
         document_profile = get_document_profile(state)
-        specialized_profile = document_profile.name != DEFAULT_PROFILE_NAME
         writer_mode = self._writer_mode(state, section)
         revision_mode = self._has_revision_context(section)
 
@@ -602,7 +599,7 @@ class WriterNode:
                 "revision_mode": revision_mode,
                 "writer_mode": writer_mode,
                 "profile_name": document_profile.name,
-                "proposal_profile": specialized_profile,
+                **document_profile.writer_diagnostic_fields(),
                 "section_title": section.title,
                 "section_budget": self._budget_diagnostic_value(
                     writer_input.current_section

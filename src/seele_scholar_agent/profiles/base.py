@@ -90,6 +90,8 @@ class DocumentProfile(Protocol):
 
     def review_diagnostic_fields(self, section_title: str, content: str) -> dict[str, Any]: ...
 
+    def writer_diagnostic_fields(self) -> dict[str, Any]: ...
+
     def outline_section_issues(
         self, section: SectionOutline, *, is_last: bool
     ) -> list[QualityIssue]: ...
@@ -204,6 +206,9 @@ class DefaultDocumentProfile:
             "reviewer_mode": "academic_review",
             "missing_core_tasks": [],
         }
+
+    def writer_diagnostic_fields(self) -> dict[str, Any]:
+        return {"proposal_profile": False}
 
     def outline_section_issues(
         self, section: SectionOutline, *, is_last: bool
