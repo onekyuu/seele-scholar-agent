@@ -1,20 +1,22 @@
 import asyncio
-from os import getenv
 
-from common import build_initial_state, build_model, build_prompts
+from common import build_model, build_prompts, build_state_from_env
+from seele_scholar_agent import GraphConfig
 from seele_scholar_agent.graph import create_writing_graph
 
 
 async def main() -> None:
-    topic = getenv("SCHOLAR_TOPIC", "AI-assisted academic writing")
-    language = getenv("SCHOLAR_LANGUAGE", "zh")
-
-    state = build_initial_state(topic=topic, language=language)
+    state = build_state_from_env("AI-assisted academic writing")
     config = {"configurable": {"thread_id": state["thread_id"]}}
     app = create_writing_graph(
         model=build_model(),
         prompts=build_prompts(),
         rag_retriever=None,
+        graph_config=GraphConfig(
+            require_topic_approval=True,
+            require_outline_approval=True,
+            require_section_approval=False,
+        ),
     )
 
     result = await app.ainvoke(state, config=config)

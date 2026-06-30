@@ -1,7 +1,12 @@
 import asyncio
 from os import getenv
 
-from common import build_initial_state, build_model, build_prompts
+from common import (
+    build_example_material_registry,
+    build_model,
+    build_prompts,
+    build_state_from_env,
+)
 from seele_scholar_agent.graph import create_simple_writing_graph
 from seele_scholar_agent.state import DocumentChunk, PaperMetadata
 
@@ -32,10 +37,11 @@ async def paper_retriever(query: str) -> list[PaperMetadata]:
 
 
 async def main() -> None:
-    state = build_initial_state(
-        topic=getenv("SCHOLAR_TOPIC", "retrieval augmented academic writing"),
-        language=getenv("SCHOLAR_LANGUAGE", "zh"),
-    )
+    state = build_state_from_env("retrieval augmented academic writing")
+    state["material_registry"] = build_example_material_registry()
+    state["check_required_material_relevance"] = getenv(
+        "SCHOLAR_CHECK_REQUIRED_MATERIALS", "1"
+    ) == "1"
 
     app = create_simple_writing_graph(
         model=build_model(),
