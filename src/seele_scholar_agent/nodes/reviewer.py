@@ -12,13 +12,12 @@ from ..agent_config import PromptsConfig
 from ..config import settings
 from ..document_profile import (
     is_compound_section_title,
-    is_proposal_plan_sentence,
     missing_proposal_core_tasks,
 )
 from ..i18n import t
 from ..logging import get_logger
 from ..policy import SectionExecutionStrategy, WritingPolicy
-from ..profiles import get_document_profile
+from ..profiles import DocumentProfile, get_document_profile
 from ..review import (
     ReviewDecision,
     SectionCandidate,
@@ -160,7 +159,7 @@ class ReviewerNode:
             section.title,
             section.content,
             state.get("claim_evidence_bindings", []),
-            proposal_profile=proposal_profile,
+            document_profile=document_profile,
         )
         if claim_source_issues:
             review.issues.extend(claim_source_issues)
@@ -324,7 +323,7 @@ class ReviewerNode:
             section.title,
             section.content,
             state.get("claim_evidence_bindings", []),
-            proposal_profile=proposal_profile,
+            document_profile=document_profile,
         )
         if claim_source_issues:
             review.issues.extend(claim_source_issues)
@@ -495,8 +494,9 @@ class ReviewerNode:
         content: str,
         bindings: list[ClaimEvidenceBinding],
         *,
-        proposal_profile: bool = False,
+        document_profile: DocumentProfile,
     ) -> tuple[list[ReviewIssue], list[QualityIssue]]:
+        proposal_profile = document_profile.uses_specialized_review_policy
         section_bindings = [binding for binding in bindings if binding.section_id == section_id]
         issues: list[ReviewIssue] = []
         quality_issues: list[QualityIssue] = []
@@ -507,7 +507,9 @@ class ReviewerNode:
             bindings_by_citation.setdefault(binding.citation_number, []).append(binding)
 
         for claim in claims:
-            if proposal_profile and self._is_proposal_deferred_claim(claim, section_title):
+            if document_profile.should_defer_claim(
+                claim.text, claim.citation_numbers, section_title
+            ):
                 continue
 
             if not claim.citation_numbers:
@@ -835,13 +837,6 @@ class ReviewerNode:
                 "citation_numbers": list(claim.citation_numbers),
                 "audit_source": "claim_source",
             },
-        )
-
-    def _is_proposal_deferred_claim(
-        self, claim: ExtractedClaim, section_title: str
-    ) -> bool:
-        return not claim.citation_numbers and is_proposal_plan_sentence(
-            claim.text, section_title
         )
 
     def _cited_sentence_context(self, content: str) -> str:
