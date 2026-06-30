@@ -70,6 +70,10 @@ class DocumentProfile(Protocol):
 
     def include_paragraph_structure_check(self) -> bool: ...
 
+    def is_schedule_section(self, section_title: str) -> bool: ...
+
+    def section_description_constraints(self, section_title: str) -> list[str]: ...
+
     def empty_reference_issue(self) -> QualityIssue | None: ...
 
     def structural_review_issues(
@@ -154,6 +158,12 @@ class DefaultDocumentProfile:
 
     def include_paragraph_structure_check(self) -> bool:
         return True
+
+    def is_schedule_section(self, section_title: str) -> bool:
+        return False
+
+    def section_description_constraints(self, section_title: str) -> list[str]:
+        return []
 
     def empty_reference_issue(self) -> QualityIssue | None:
         return None

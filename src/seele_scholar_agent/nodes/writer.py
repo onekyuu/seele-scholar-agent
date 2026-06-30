@@ -8,10 +8,7 @@ from langchain_openai import ChatOpenAI
 
 from ..agent_config import PromptsConfig, RAGRetrieverFunc
 from ..config import settings
-from ..document_profile import (
-    is_compound_section_title,
-    is_schedule_section,
-)
+from ..document_profile import is_compound_section_title
 from ..draft.mapping import intent_instruction
 from ..i18n import t
 from ..logging import get_logger
@@ -20,6 +17,7 @@ from ..profiles import (
     DEFAULT_PROFILE_NAME,
     PROFILE_DRAFT_MODE,
     PROFILE_REVISION_MODE,
+    DocumentProfile,
     get_default_specialized_writer_prompts,
     get_document_profile,
 )
@@ -431,6 +429,7 @@ class WriterNode:
                 lang,
                 numbered_papers,
                 rag_context,
+                document_profile,
             )
             writer = self._draft_writer_for_mode(writer_mode)
             raw_content = await writer.draft(input_data)
@@ -491,7 +490,7 @@ class WriterNode:
                     section.title, content
                 ),
                 "review_comment_count": len(section.review_comments),
-                "schedule_section": is_schedule_section(section.title),
+                "schedule_section": document_profile.is_schedule_section(section.title),
             },
         }
         if new_evidence_packets:
@@ -559,6 +558,7 @@ class WriterNode:
                 )
             ),
             rag_context,
+            document_profile,
         )
 
         full_text = ""
@@ -615,7 +615,7 @@ class WriterNode:
                     section.title, content
                 ),
                 "review_comment_count": len(section.review_comments),
-                "schedule_section": is_schedule_section(section.title),
+                "schedule_section": document_profile.is_schedule_section(section.title),
             },
         }
         if new_evidence_packets:
@@ -630,13 +630,15 @@ class WriterNode:
         lang: str,
         numbered_papers: str,
         rag_context: str,
+        document_profile: DocumentProfile,
     ) -> dict[str, Any]:
         return {
             "topic": writer_input.topic,
             "language": t(lang, "language_name"),
             "section_title": writer_input.current_section.title,
             "section_description": self._build_section_description_from_spec(
-                writer_input.current_section
+                writer_input.current_section,
+                document_profile,
             ),
             "suggested_figures": self._build_suggested_figures_from_spec(
                 writer_input.current_section
@@ -650,7 +652,9 @@ class WriterNode:
             "current_content": section.content or "无",
         }
 
-    def _build_section_description_from_spec(self, spec: SectionWritingSpec) -> str:
+    def _build_section_description_from_spec(
+        self, spec: SectionWritingSpec, document_profile: DocumentProfile
+    ) -> str:
         description = spec.description.strip()
         constraints: list[str] = []
         if spec.budget is not None:
@@ -680,11 +684,7 @@ class WriterNode:
             constraints.append("Target claims: " + "; ".join(spec.target_claims))
         if spec.citation_plan:
             constraints.append("Citation plan: " + "; ".join(spec.citation_plan))
-        if is_schedule_section(spec.title):
-            constraints.append(
-                "Schedule density: use compact wording but preserve the complete two-year "
-                "timeline, including 1年次前期, 1年次後期, 2年次前期, and 2年次後期."
-            )
+        constraints.extend(document_profile.section_description_constraints(spec.title))
         if not description:
             return "\n".join(constraints)
         return f"{description}\n\n" + "\n".join(constraints)
@@ -823,11 +823,14 @@ class WriterNode:
         style_guidance: str,
         review_comments: str,
     ) -> dict[str, Any]:
+        document_profile = get_document_profile(state)
         return {
             "topic": state["topic"],
             "language": t(lang, "language_name"),
             "section_title": section.title,
-            "section_description": self._build_section_description(section),
+            "section_description": self._build_section_description(
+                section, document_profile
+            ),
             "suggested_figures": self._build_suggested_figures(section, state),
             "outline_json": outline_json,
             "previous_sections": previous_sections,
@@ -990,7 +993,9 @@ class WriterNode:
             return "无"
         return "\n".join([f"- {c}" for c in section.review_comments])
 
-    def _build_section_description(self, section: SectionDraft) -> str:
+    def _build_section_description(
+        self, section: SectionDraft, document_profile: DocumentProfile | None = None
+    ) -> str:
         description = section.description.strip()
         constraints: list[str] = []
 
@@ -1005,11 +1010,8 @@ class WriterNode:
                 "target language, unless the outline or caller provides a stricter budget."
             )
 
-        if is_schedule_section(section.title):
-            constraints.append(
-                "Schedule density: use compact wording but preserve the complete two-year "
-                "timeline, including 1年次前期, 1年次後期, 2年次前期, and 2年次後期."
-            )
+        if document_profile is not None:
+            constraints.extend(document_profile.section_description_constraints(section.title))
 
         if not description:
             return "\n".join(constraints)

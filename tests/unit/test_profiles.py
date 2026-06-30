@@ -20,6 +20,8 @@ def test_default_profile_review_input_policy():
     assert profile.citation_review_category() == "content_quality"
     assert profile.should_emit_claim_source_review_issue("unsupported_binding") is True
     assert profile.include_paragraph_structure_check() is True
+    assert profile.is_schedule_section("Schedule") is False
+    assert profile.section_description_constraints("Schedule") == []
 
 
 def test_research_proposal_profile_review_input_policy():
@@ -32,6 +34,10 @@ def test_research_proposal_profile_review_input_policy():
     assert profile.citation_review_category() == "citation_warning"
     assert profile.should_emit_claim_source_review_issue("unsupported_binding") is False
     assert profile.include_paragraph_structure_check() is False
+    assert profile.is_schedule_section("研究計画・スケジュール") is True
+    assert "1年次前期" in profile.section_description_constraints(
+        "研究計画・スケジュール"
+    )[0]
 
 
 def test_research_proposal_profile_flags_incomplete_schedule():

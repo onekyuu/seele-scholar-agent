@@ -250,6 +250,17 @@ class ResearchProposalProfile:
     def include_paragraph_structure_check(self) -> bool:
         return False
 
+    def is_schedule_section(self, section_title: str) -> bool:
+        return is_schedule_section(section_title)
+
+    def section_description_constraints(self, section_title: str) -> list[str]:
+        if not self.is_schedule_section(section_title):
+            return []
+        return [
+            "Schedule density: use compact wording but preserve the complete two-year "
+            "timeline, including 1年次前期, 1年次後期, 2年次前期, and 2年次後期."
+        ]
+
     def empty_reference_issue(self) -> QualityIssue | None:
         return QualityIssue(
             code="PROPOSAL_NO_INLINE_CITATIONS",
