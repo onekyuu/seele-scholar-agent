@@ -142,6 +142,7 @@ class ResearchProposalProfile:
     skip_auto_finalizer = True
     uses_profile_outline_quality = True
     uses_strict_academic_integrity = False
+    review_document_type = RESEARCH_PROPOSAL_PROFILE_NAME
 
     def effective_paper_type(self, requested: str) -> str:
         return RESEARCH_PROPOSAL_PROFILE_NAME if requested == "auto" else requested
@@ -188,6 +189,17 @@ class ResearchProposalProfile:
             or PROPOSAL_DRAFT_USER_PROMPT,
             revision_user_prompt=prompts.proposal_revision_user_prompt
             or PROPOSAL_REVISION_USER_PROMPT,
+        )
+
+    def review_policy_text(self) -> str:
+        return (
+            "Review as a Japanese graduate-school research proposal application, not as "
+            "an academic paper body section. Only block for off-topic content, missing "
+            "title-core task, truncation/incomplete sentences, impossible-to-judge "
+            "purpose/method/plan feasibility, severe factual error, misleading citation, "
+            "or enumeration/structure breakage. Treat most missing citations, citation "
+            "mismatches, and unsupported claims as warnings unless they mislead the "
+            "proposal."
         )
 
     def missing_core_tasks(self, section_title: str, content: str) -> list[str]:

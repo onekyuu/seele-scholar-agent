@@ -108,6 +108,7 @@ class ReviewerNode:
 
         section = sections[index]
         proposal_profile = is_research_proposal(state)
+        document_profile = get_document_profile(state)
 
         logger.info("reviewing section", title=section.title)
 
@@ -118,8 +119,8 @@ class ReviewerNode:
                     "topic": state["topic"],
                     "section_title": section.title,
                     "content": section.content,
-                    "document_type": "research_proposal" if proposal_profile else "academic_paper",
-                    "review_policy": self._review_policy_text(proposal_profile),
+                    "document_type": document_profile.review_document_type,
+                    "review_policy": document_profile.review_policy_text(),
                 },
             )
             review = ReviewResult(
@@ -267,14 +268,15 @@ class ReviewerNode:
 
         section = sections[index]
         proposal_profile = is_research_proposal(state)
+        document_profile = get_document_profile(state)
         yield NodeStreamEvent(type="progress", progress=f"reviewing:{section.title}")
 
         input_data = {
             "topic": state["topic"],
             "section_title": section.title,
             "content": section.content,
-            "document_type": "research_proposal" if proposal_profile else "academic_paper",
-            "review_policy": self._review_policy_text(proposal_profile),
+            "document_type": document_profile.review_document_type,
+            "review_policy": document_profile.review_policy_text(),
         }
 
         full_text = ""
@@ -488,19 +490,6 @@ class ReviewerNode:
         except Exception as e:
             logger.warning("citation alignment check failed", error=str(e))
             return []
-
-    def _review_policy_text(self, proposal_profile: bool) -> str:
-        if not proposal_profile:
-            return "Review as an academic paper section."
-        return (
-            "Review as a Japanese graduate-school research proposal application, not as "
-            "an academic paper body section. Only block for off-topic content, missing "
-            "title-core task, truncation/incomplete sentences, impossible-to-judge "
-            "purpose/method/plan feasibility, severe factual error, misleading citation, "
-            "or enumeration/structure breakage. Treat most missing citations, citation "
-            "mismatches, and unsupported claims as warnings unless they mislead the "
-            "proposal."
-        )
 
     def _audit_claim_source_support(
         self,
