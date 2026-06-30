@@ -1,4 +1,5 @@
 from seele_scholar_agent.nodes.methodology_audit import MethodologyAudit
+from seele_scholar_agent.profiles.research_proposal import ResearchProposalProfile
 
 
 def test_methodology_audit_flags_missing_sample_size():
@@ -62,3 +63,14 @@ def test_methodology_audit_skips_generic_non_method_section():
     )
 
     assert findings == []
+
+
+def test_research_proposal_profile_skips_methodology_audit_until_completed_results():
+    profile = ResearchProposalProfile()
+
+    assert profile.skip_methodology_audit(
+        "This section explains participants, datasets, and planned analysis."
+    )
+    assert not profile.skip_methodology_audit(
+        "Results show the planned analysis improved accuracy."
+    )
