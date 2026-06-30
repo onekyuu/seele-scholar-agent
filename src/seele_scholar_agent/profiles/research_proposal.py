@@ -349,6 +349,9 @@ class ResearchProposalProfile(DefaultDocumentProfile):
             ),
         }
 
+    def writer_diagnostic_fields(self) -> dict[str, Any]:
+        return {"proposal_profile": True}
+
     def _core_structure_issues(
         self, section_id: str, section_title: str, content: str
     ) -> tuple[list[ReviewIssue], list[QualityIssue]]:

@@ -16,6 +16,7 @@ def test_default_profile_review_input_policy():
         "reviewer_mode": "academic_review",
         "missing_core_tasks": [],
     }
+    assert profile.writer_diagnostic_fields() == {"proposal_profile": False}
     assert profile.citation_alignment_uses_cited_context() is False
     assert profile.citation_review_category() == "content_quality"
     assert profile.should_emit_claim_source_review_issue("unsupported_binding") is True
@@ -31,6 +32,7 @@ def test_research_proposal_profile_review_input_policy():
     assert profile.review_document_type == "research_proposal"
     assert profile.uses_specialized_review_policy is True
     assert "Japanese graduate-school research proposal" in profile.review_policy_text()
+    assert profile.writer_diagnostic_fields() == {"proposal_profile": True}
     assert profile.citation_alignment_uses_cited_context() is True
     assert profile.citation_review_category() == "citation_warning"
     assert profile.should_emit_claim_source_review_issue("unsupported_binding") is False
